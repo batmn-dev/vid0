@@ -91,9 +91,11 @@ intervals produced zero growing highlights and one settlement highlight, process
 only the final 12,243 characters. This removes the measured duplicate work; it is
 not a 20.5-times application-speed claim.
 
-Validation: 74 focused renderer/Markdown/service tests and 59 route/transform
-tests passed. Narrow ESLint, `git diff --check`, and the instrumented production
-`bun run build:next` passed. The build retains its existing design-system dynamic
+Earlier shared-highlighting candidate validation (`uU3FG_tp19GunxkQ6gdiB`):
+74 focused renderer/Markdown/service tests and 59 route/transform tests passed,
+before the final Gemini eligibility and metadata-preservation checks brought the
+route/transform total to 63 (recorded below). Narrow ESLint, `git diff --check`,
+and the instrumented production `bun run build:next` passed. The build retains its existing design-system dynamic
 filesystem tracing warning. Independent review found no actionable issue.
 Build-generated `tsconfig.json` entries were removed; no configuration change is
 part of the patch. Evidence and exact test commands are under
@@ -192,7 +194,8 @@ transform dropped those events and could lose new metadata on a fragment that
 completed an earlier held word. The shared fix flushes held text at metadata
 boundaries and retains empty metadata events in order, without treating them as
 text-arrival samples. Two focused tests reproduced the losses before the fix;
-all 63 route/transform tests now pass. Tool-call metadata was already preserved
+all 63 tests in `app/api/chat/word-chunking-transform.test.ts` and
+`app/api/chat/chat-turn-runtime.test.ts` pass. Tool-call metadata was already preserved
 by the non-text path; this finding does not establish a tool-call failure.
 
 No performance parity or complete-suite pass is claimed from unit tests, partial
