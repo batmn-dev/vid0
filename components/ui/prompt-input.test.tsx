@@ -237,6 +237,32 @@ describe("PromptInput responsive expansion", () => {
     ).toBe("Short")
   })
 
+  it("remeasures text appended after a link with a long destination", () => {
+    const link = `[Short](https://example.com/${"x".repeat(2100)})`
+    const render = (value: string) =>
+      act(() => {
+        root.render(
+          <PromptInput value={value} onValueChange={() => {}}>
+            <PromptInputActions data-composer-leading="true" />
+            <PromptInputTextarea aria-label="Ask anything" />
+            <PromptInputActions data-composer-trailing="true" />
+          </PromptInput>
+        )
+      })
+    render(link)
+    expect(container.querySelector("form")?.hasAttribute("data-expanded")).toBe(
+      false
+    )
+    render(`${link} ${"visible text ".repeat(10)}`)
+    expect(container.querySelector("form")?.hasAttribute("data-expanded")).toBe(
+      true
+    )
+    render(link)
+    expect(container.querySelector("form")?.hasAttribute("data-expanded")).toBe(
+      false
+    )
+  })
+
   it("disconnects geometry observation with the textarea DOM lifecycle", () => {
     act(() => {
       root.render(

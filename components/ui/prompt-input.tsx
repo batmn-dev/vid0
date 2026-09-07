@@ -374,15 +374,6 @@ function measureTextareaScrollHeight(
 
 const COLLAPSED_EDITOR_HEIGHT = 42
 
-/**
- * The expansion decision only needs "does this value wrap past one line?", so
- * measuring a bounded prefix is equivalent — no composer line fits anywhere
- * near this many characters. The cap keeps a pathological value (e.g. a 60k
- * character paste) from forcing a full clone layout of the entire text on
- * every keystroke.
- */
-const EXPANSION_MEASURE_CHAR_LIMIT = 2000
-
 function getEditorAttributes({
   id,
   ariaLabel,
@@ -534,7 +525,7 @@ const PromptInputTextarea = React.forwardRef<
 
   const measuredLayout = React.useRef<{
     textarea: HTMLTextAreaElement
-    value: string
+    doc: EditorState["doc"]
     width: number
     className: string
     style: string
@@ -568,7 +559,7 @@ const PromptInputTextarea = React.forwardRef<
       }
 
       const compactWidth = getCompactEditorWidth(textarea)
-      const measuredValue = nextValue.slice(0, EXPANSION_MEASURE_CHAR_LIMIT)
+      const doc = viewRef.current.state.doc
       const previous = measuredLayout.current
       const style = textarea.style.cssText
       const computed = getComputedStyle(textarea)
@@ -596,7 +587,7 @@ const PromptInputTextarea = React.forwardRef<
       // The editor transaction and controlled-value commit measure the same input.
       const compactScrollHeight =
         previous?.textarea === textarea &&
-        previous.value === measuredValue &&
+        previous.doc === doc &&
         previous.width === compactWidth &&
         previous.className === textarea.className &&
         previous.style === style &&
@@ -604,13 +595,13 @@ const PromptInputTextarea = React.forwardRef<
           ? previous.height
           : measureTextareaScrollHeight(
               textarea,
-              measuredValue,
+              nextValue,
               compactWidth,
               viewRef.current?.dom
             )
       measuredLayout.current = {
         textarea,
-        value: measuredValue,
+        doc,
         width: compactWidth,
         className: textarea.className,
         style,

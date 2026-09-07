@@ -389,6 +389,23 @@ describe("MessageUser edits", () => {
     expect(content?.querySelector(".katex, del, pre")).toBeNull()
   })
 
+  it.each([1, 2])(
+    "preserves %i leading and trailing blank lines around formatted text",
+    (lines) => {
+      renderEditableMessage({
+        children: `${"\n".repeat(lines)}**text**${"\n".repeat(lines)}`,
+      })
+      const content = container?.querySelector(".user-message-markdown")
+      expect(
+        content?.firstElementChild?.getAttribute("data-preserved-blank-lines")
+      ).toBe(String(lines))
+      expect(
+        content?.lastElementChild?.getAttribute("data-preserved-blank-lines")
+      ).toBe(String(lines))
+      expect(content?.querySelector("strong")?.textContent).toBe("text")
+    }
+  )
+
   it("keeps links semantic and excludes unsafe destinations", () => {
     renderEditableMessage({
       children:

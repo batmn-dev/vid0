@@ -233,14 +233,16 @@ function renderUserMessageNode(
   const children: React.ReactNode[] = []
   let emptyParagraphs = 0
   const appendBlankLines = (index: number) => {
-    if (emptyParagraphs > 1) {
+    const atEdge = children.length === 0 || index === node.childCount
+    const blankLines = emptyParagraphs - (atEdge ? 0 : 1)
+    if (blankLines > 0) {
       children.push(
         <span
           key={`blank-${index}`}
           aria-hidden="true"
           className="user-message-preserved-blank-lines"
-          data-preserved-blank-lines={emptyParagraphs - 1}
-          style={{ height: `${emptyParagraphs - 1}lh` }}
+          data-preserved-blank-lines={blankLines}
+          style={{ height: `${blankLines}lh` }}
         />
       )
     }
@@ -260,7 +262,7 @@ function renderUserMessageNode(
       emptyParagraphs += 1
       return
     }
-    // The first empty paragraph is Markdown separation; further ones paint gaps.
+    // Only interior gaps include a Markdown separator supplied by block margins.
     appendBlankLines(index)
     // The reference omits paragraph wrappers inside tight list items.
     if (tightItem && child.type.name === "paragraph") {
