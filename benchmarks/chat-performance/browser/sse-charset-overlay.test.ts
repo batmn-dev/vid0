@@ -17,6 +17,7 @@ describe("SSE charset compatibility overlay", () => {
 
   it("rejects unknown or ambiguous response construction", () => {
     for (const source of ["", head.replace("charset=utf-8", "charset=ascii"),
+      head.replace("consumeSseStream: consumeStream,", "consumeSseStream: consumeStream, ...responseOptions,"),
       head.replace(header, "").repeat(2)]) {
       expect(() => applySseCharsetOverlay(source)).toThrow()
     }

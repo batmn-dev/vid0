@@ -1,8 +1,12 @@
 const originalResponse = `    return createUIMessageStreamResponse({
-      stream: observedResponseStream,`
+      stream: observedResponseStream,
+      consumeSseStream: consumeStream,
+    })`
 const utf8Response = `    return createUIMessageStreamResponse({
       headers: { "content-type": "text/event-stream; charset=utf-8" },
-      stream: observedResponseStream,`
+      stream: observedResponseStream,
+      consumeSseStream: consumeStream,
+    })`
 
 /** Clarify SSE decoding without copying other runtime changes into the baseline. */
 export function applySseCharsetOverlay(source: string) {
