@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
+import { createPromptInputDocument, readPromptInputDocument } from "@/components/ui/prompt-input-schema"
 import {
   buildDeterministicPartScript,
   DETERMINISTIC_PERF_SCENARIOS,
@@ -21,6 +22,13 @@ describe("deterministic perf directive", () => {
         directiveMessage("[[perf:text-only:30:fixed]]")
       )
     ).toBeNull()
+  })
+
+  it("recognizes a directive after rich-composer serialization", () => {
+    const text = readPromptInputDocument(createPromptInputDocument("[[perf:short-prose:100:fixed]]"))
+    expect(parseDeterministicPerfDirective(directiveMessage(text))).toBeNull()
+    process.env.CHAT_PERF_DETERMINISTIC_PROVIDER = "1"
+    expect(parseDeterministicPerfDirective(directiveMessage(text))).toEqual({ scenario: "short-prose", chunksPerSecond: 100, shape: "fixed" })
   })
 
   it("parses only a well-formed directive on the TRAILING user message", () => {

@@ -5,6 +5,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import os from "node:os"
 import path from "node:path"
 import { validateDependencyOverlay } from "./dependency-overlay"
+import { validateDirectiveOverlay } from "./directive-overlay"
 import { LEGACY_MEASUREMENT_BASE, MEASUREMENT_FILES, MEASUREMENT_HOOK_FILES, measurementBootstrap } from "./measurement-overlay"
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..")
@@ -122,6 +123,12 @@ function main() {
     for (const file of ["package.json", "bun.lock"])
       cpSync(path.join(root, file), path.join(baselineRoot, file))
   }
+  const providerFile = "app/api/chat/deterministic-provider.ts"
+  const directiveOverlay = validateDirectiveOverlay(
+    readFileSync(path.join(baselineRoot, providerFile), "utf8"),
+    readFileSync(path.join(root, providerFile), "utf8"),
+  )
+  if (directiveOverlay) cpSync(path.join(root, providerFile), path.join(baselineRoot, providerFile))
   // Copy the driver, not the product. Fixtures, dependencies and clocks must match.
   for (const file of ["bun.lock", "app/api/chat/deterministic-provider.ts", "benchmarks/chat-performance/fixtures.ts", "convex/lib/runTimingReceipt.ts"])
     if (digest(path.join(root, file)) !== digest(path.join(baselineRoot, file)))
@@ -143,7 +150,7 @@ function main() {
     overlaySha256: legacy ? digest(path.join(root, harnessDirectory, "measurement-overlay.patch")) : null,
     measurementHashes, timingHelperSha256: digest(path.join(root, "convex/lib/runTimingReceipt.ts")),
     dependencySha256: digest(path.join(root, "bun.lock")),
-    originalBaseDependencySha256, dependencyOverlay,
+    originalBaseDependencySha256, dependencyOverlay, directiveOverlay,
     hookSources: Object.fromEntries(MEASUREMENT_HOOK_FILES.map((file) => [file, {
       base: digest(path.join(baselineRoot, file)), head: digest(path.join(root, file)),
     }])),
