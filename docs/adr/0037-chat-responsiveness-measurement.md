@@ -154,6 +154,11 @@ in the server-gated deterministic directive parser. The paired driver verifies
 that exact source change, applies it to both builds, and records it in the
 manifest. Provider output, fixtures, cadence, environment gating, and comparison
 thresholds must remain identical; any other provider-source difference fails.
+The SSE header overlay adds only `charset=utf-8` to the response Content-Type
+on both builds. This prevents Chromium's captured response body from decoding
+UTF-8 punctuation as Windows-1252. It preserves stream bytes and timing, rejects
+unrecognized response construction, and records its application in the manifest
+and baseline diff without copying other runtime changes.
 
 Production DOM observation uses the existing Sentry metric transport, with only
 closed metric names and durations. `NEXT_PUBLIC_CHAT_UI_SAMPLE_RATE` defaults to

@@ -138,7 +138,7 @@ function makeFinalTextStepChunks(): LanguageModelV4StreamPart[] {
     { type: "stream-start" as const, warnings: [] },
     { type: "text-start" as const, id: "t1" },
     { type: "text-delta" as const, id: "t1", delta: "The weather is " },
-    { type: "text-delta" as const, id: "t1", delta: "sunny." },
+    { type: "text-delta" as const, id: "t1", delta: "sunny — 20°C." },
     { type: "text-end" as const, id: "t1" },
     {
       type: "finish" as const,
@@ -532,9 +532,16 @@ describe("chat turn runtime × real ai@7 streamText", () => {
     const response = await runtime.toResponse(new AbortController().signal)
 
     expect(response.status).toBe(200)
+    expect(Object.fromEntries(response.headers)).toEqual({
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+      "x-vercel-ai-ui-message-stream": "v1",
+      "x-accel-buffering": "no",
+    })
     const sse = await response.text()
     expect(sse).toContain('"messageId":"msg1"') // durable assistant id
-    expect(extractTextDeltasFromSse(sse)).toBe("The weather is sunny.")
+    expect(extractTextDeltasFromSse(sse)).toBe("The weather is sunny — 20°C.")
     expect(sse).toContain('"type":"finish"')
     expect(sse.trimEnd().endsWith("data: [DONE]")).toBe(true)
 
@@ -625,7 +632,7 @@ describe("chat turn runtime × real ai@7 streamText", () => {
     expect(completed.args).toMatchObject({
       runId: "run1",
       messageId: "msg1",
-      content: "The weather is sunny.",
+      content: "The weather is sunny — 20°C.",
       finishReason: "stop",
       totalToolCalls: TOOL_STEPS,
       failedToolCalls: 0,

@@ -2314,6 +2314,7 @@ export function createChatTurnRuntime(args: {
     }
 
     return createUIMessageStreamResponse({
+      headers: { "content-type": "text/event-stream; charset=utf-8" },
       stream: observedResponseStream,
       consumeSseStream: consumeStream,
     })
