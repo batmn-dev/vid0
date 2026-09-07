@@ -13,6 +13,7 @@ import {
   it,
   vi,
 } from "vitest"
+import { Button } from "./button"
 import {
   PromptInput,
   PromptInputAction,
@@ -20,7 +21,6 @@ import {
   PromptInputFooter,
   PromptInputTextarea,
 } from "./prompt-input"
-import { Button } from "./button"
 import { ScrollRoot } from "./scroll-root"
 
 let surfaceWidth = 768
@@ -150,15 +150,18 @@ describe("PromptInput responsive expansion", () => {
       } as unknown as CSSStyleDeclaration
     })
 
-    vi.spyOn(
-      HTMLTextAreaElement.prototype,
-      "scrollHeight",
-      "get"
-    ).mockImplementation(function scrollHeight(this: HTMLTextAreaElement) {
-      scrollHeightReads += 1
-      const width = Number.parseFloat(this.style.width) || 555
-      return this.value.length * 8 > width ? 68 : 42
-    })
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(
+      function scrollHeight(this: HTMLElement) {
+        if (
+          !this.classList.contains("composer-prosemirror") ||
+          this.style.position !== "absolute"
+        )
+          return 42
+        scrollHeightReads += 1
+        const width = Number.parseFloat(this.style.width) || 555
+        return (this.textContent?.length ?? 0) * 8 > width ? 68 : 42
+      }
+    )
 
     container = document.createElement("div")
     document.body.appendChild(container)
@@ -211,6 +214,27 @@ describe("PromptInput responsive expansion", () => {
     surfaceWidth = 768
     act(() => observer?.trigger())
     expect(form?.hasAttribute("data-expanded")).toBe(false)
+  })
+
+  it("measures the visible link label rather than its destination", () => {
+    act(() => {
+      root.render(
+        <PromptInput
+          value={`[Short](https://example.com/${"long".repeat(100)})`}
+          onValueChange={() => {}}
+        >
+          <PromptInputActions data-composer-leading="true" />
+          <PromptInputTextarea aria-label="Ask anything" />
+          <PromptInputActions data-composer-trailing="true" />
+        </PromptInput>
+      )
+    })
+    expect(container.querySelector("form")?.hasAttribute("data-expanded")).toBe(
+      false
+    )
+    expect(
+      container.querySelector(".composer-prosemirror a")?.textContent
+    ).toBe("Short")
   })
 
   it("disconnects geometry observation with the textarea DOM lifecycle", () => {
@@ -420,6 +444,32 @@ describe("PromptInput responsive expansion", () => {
     )
   })
 
+  it("keeps the composer ID distinct from a mounted message editor", () => {
+    const renderEditors = (editId: string) => {
+      act(() => {
+        root.render(
+          <>
+            <PromptInput value="New message">
+              <PromptInputTextarea />
+            </PromptInput>
+            <PromptInput value="Earlier message">
+              <PromptInputTextarea id={editId} autoFocus={false} />
+            </PromptInput>
+          </>
+        )
+      })
+    }
+    renderEditors("message-edit-first")
+    const main = container.querySelector("#prompt-textarea")
+    const edit = container.querySelector("#message-edit-first")
+    expect(container.querySelectorAll("#prompt-textarea")).toHaveLength(1)
+    expect(edit?.textContent).toBe("Earlier message")
+    renderEditors("message-edit-second")
+    expect(container.querySelector("#message-edit-first")).toBeNull()
+    expect(container.querySelector("#message-edit-second")).toBe(edit)
+    expect(container.querySelector("#prompt-textarea")).toBe(main)
+  })
+
   it("submits Enter and preserves Shift+Enter as a draft paragraph", () => {
     const onSubmit = vi.fn()
     const onValueChange = vi.fn()
@@ -626,5 +676,173 @@ describe("PromptInput responsive expansion", () => {
     expect(
       document.body.querySelector('[data-slot="tooltip-content"]')?.textContent
     ).toBe("Collapse")
+  })
+})
+
+describe("composer formatting input rules", () => {
+  it("discards queued selection positioning after editor teardown", async () => {
+    const { EditorView } = await import("prosemirror-view")
+    const { EditorState, TextSelection } = await import("prosemirror-state")
+    const { createPromptInputPlugins, createPromptInputDocument } =
+      await import("./prompt-input-editor")
+    const doc = createPromptInputDocument("Selected text")
+    const mount = document.createElement("div")
+    document.body.append(mount)
+    const view = new EditorView(mount, {
+      state: EditorState.create({
+        doc,
+        selection: TextSelection.create(doc, 1, 9),
+        plugins: createPromptInputPlugins(() => ""),
+      }),
+    })
+    // The focused DOM can survive briefly while its EditorView is replaced by HMR.
+    vi.spyOn(view, "hasFocus").mockReturnValue(true)
+    const positioning = vi.spyOn(view, "coordsAtPos").mockReturnValue(rect(100))
+    view.dom.dispatchEvent(new FocusEvent("focus"))
+    view.destroy()
+    positioning.mockClear()
+    await Promise.resolve()
+    expect(positioning).not.toHaveBeenCalled()
+    mount.remove()
+    vi.restoreAllMocks()
+  })
+
+  it("formats the selected text and applies then clears a link through the toolbar", async () => {
+    const { EditorView } = await import("prosemirror-view")
+    const { EditorState, TextSelection } = await import("prosemirror-state")
+    const {
+      createPromptInputPlugins,
+      createPromptInputDocument,
+      promptInputSchema,
+    } = await import("./prompt-input-editor")
+    const mount = document.createElement("div")
+    document.body.append(mount)
+    const view = new EditorView(mount, {
+      state: EditorState.create({
+        doc: createPromptInputDocument("Selected text"),
+        plugins: createPromptInputPlugins(() => ""),
+      }),
+    })
+    try {
+      view.focus()
+      view.dispatch(
+        view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 9))
+      )
+      const toolbar = document.querySelector<HTMLElement>(
+        '[role="toolbar"][aria-label="Formatting"]'
+      )
+      expect(toolbar?.hidden).toBe(false)
+      toolbar?.querySelector<HTMLButtonElement>('[aria-label="Bold"]')?.click()
+      expect(
+        view.state.doc.rangeHasMark(1, 9, promptInputSchema.marks.strong)
+      ).toBe(true)
+      expect(view.state.selection.to - view.state.selection.from).toBe(8)
+      toolbar?.querySelector<HTMLButtonElement>('[aria-label="Link"]')?.click()
+      expect(
+        mount.querySelector(".composer-format-preserved-selection")?.textContent
+      ).toBe("Selected")
+      toolbar
+        ?.querySelector("input")
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+        )
+      expect(
+        mount.querySelector(".composer-format-preserved-selection")
+      ).toBeNull()
+      const reopenLink = () => {
+        view.focus()
+        view.dispatch(
+          view.state.tr.setSelection(TextSelection.create(view.state.doc, 1))
+        )
+        view.dispatch(
+          view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 9))
+        )
+        toolbar
+          ?.querySelector<HTMLButtonElement>('[aria-label="Link"]')
+          ?.click()
+      }
+      reopenLink()
+      document.body.dispatchEvent(
+        new MouseEvent("pointerdown", { bubbles: true })
+      )
+      expect(
+        mount.querySelector(".composer-format-preserved-selection")
+      ).toBeNull()
+      reopenLink()
+      const input = toolbar?.querySelector("input")
+      expect(input).toBeTruthy()
+      if (input) {
+        input.value = "https://example.com"
+        input.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+      toolbar
+        ?.querySelector<HTMLButtonElement>('[aria-label="Apply link"]')
+        ?.click()
+      expect(
+        view.state.doc.rangeHasMark(1, 9, promptInputSchema.marks.link)
+      ).toBe(true)
+      expect(view.state.selection.empty).toBe(true)
+      expect(
+        mount.querySelector(".composer-format-preserved-selection")
+      ).toBeNull()
+      toolbar
+        ?.querySelector<HTMLButtonElement>('[aria-label="Clear link"]')
+        ?.click()
+      expect(
+        view.state.doc.rangeHasMark(1, 9, promptInputSchema.marks.link)
+      ).toBe(false)
+      expect(toolbar?.hidden).toBe(true)
+    } finally {
+      view.destroy()
+      mount.remove()
+    }
+  })
+
+  it("turns typed prefixes and emphasis into rich nodes and restores syntax on undo", async () => {
+    const { EditorView } = await import("prosemirror-view")
+    const { EditorState, TextSelection } = await import("prosemirror-state")
+    const { undoInputRule } = await import("prosemirror-inputrules")
+    const {
+      createPromptInputPlugins,
+      promptInputSchema,
+      readPromptInputDocument,
+    } = await import("./prompt-input-editor")
+    for (const [prefix, typed, expected, nodeName] of [
+      ["#", " ", "", "heading"],
+      ["-", " ", "", "bullet_list"],
+      ["1.", " ", "", "ordered_list"],
+      ["**Bold*", "*", "**Bold**", "paragraph"],
+      ["*Italic", "*", "*Italic*", "paragraph"],
+    ]) {
+      const doc = promptInputSchema.nodes.doc.create(
+        null,
+        promptInputSchema.nodes.paragraph.create(
+          null,
+          promptInputSchema.text(prefix)
+        )
+      )
+      const view = new EditorView(document.createElement("div"), {
+        state: EditorState.create({
+          doc,
+          selection: TextSelection.atEnd(doc),
+          plugins: createPromptInputPlugins(() => ""),
+        }),
+      })
+      try {
+        const from = view.state.selection.from
+        const handled = view.someProp("handleTextInput", (handler) =>
+          handler(view, from, from, typed, () =>
+            view.state.tr.insertText(typed)
+          )
+        )
+        expect(handled, prefix).toBe(true)
+        expect(view.state.doc.firstChild?.type.name, prefix).toBe(nodeName)
+        expect(readPromptInputDocument(view.state.doc), prefix).toBe(expected)
+        expect(undoInputRule(view.state, view.dispatch), prefix).toBe(true)
+        expect(view.state.doc.textContent, prefix).toBe(prefix + typed)
+      } finally {
+        view.destroy()
+      }
+    }
   })
 })

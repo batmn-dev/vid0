@@ -33,6 +33,109 @@ describe("PromptInput structured document", () => {
       schema: promptInputSchema,
     })
 
+  it("keeps a submitted paragraph outside the preceding list", () => {
+    const { nodes, marks } = promptInputSchema
+    const paragraph = (text: string) =>
+      nodes.paragraph.create(null, text ? promptInputSchema.text(text) : null)
+    const list = nodes.bullet_list.create(null, [
+      nodes.list_item.create(null, [
+        paragraph("item"),
+        nodes.bullet_list.create(
+          null,
+          nodes.list_item.create(null, paragraph("nested"))
+        ),
+      ]),
+    ])
+    const document = nodes.doc.create(null, [
+      nodes.heading.create({ level: 1 }, promptInputSchema.text("Heading 1")),
+      nodes.heading.create({ level: 2 }, promptInputSchema.text("Heading 2")),
+      list,
+      nodes.paragraph.create(
+        null,
+        promptInputSchema.text("italic paragraph", [marks.em.create()])
+      ),
+    ])
+    const source = readPromptInputDocument(document)
+    expect(source).toBe(
+      "# Heading 1\n## Heading 2\n- item\n  - nested\n\n*italic paragraph*"
+    )
+    expect(createPromptInputDocument(source).eq(document)).toBe(true)
+  })
+
+  it("separates non-one ordered lists without inventing empty paragraphs", () => {
+    const { nodes } = promptInputSchema
+    const paragraph = (text = "") =>
+      nodes.paragraph.create(null, text ? promptInputSchema.text(text) : null)
+    const list = nodes.ordered_list.create(
+      { order: 3 },
+      nodes.list_item.create(null, paragraph("third"))
+    )
+    for (const content of [
+      [paragraph("before"), list, paragraph("after")],
+      [
+        nodes.bullet_list.create(
+          null,
+          nodes.list_item.create(null, [
+            paragraph("outer"),
+            list,
+            paragraph("after nested"),
+          ])
+        ),
+      ],
+      [paragraph("before"), paragraph(), list, paragraph(), paragraph("after")],
+      [paragraph(), list, paragraph()],
+      [
+        nodes.heading.create({ level: 1 }, promptInputSchema.text("Heading")),
+        paragraph(),
+        list,
+        paragraph(),
+        nodes.heading.create({ level: 2 }, promptInputSchema.text("Next")),
+      ],
+    ]) {
+      const document = nodes.doc.create(null, content)
+      const source = readPromptInputDocument(document)
+      expect(createPromptInputDocument(source).eq(document), source).toBe(true)
+    }
+    expect(
+      readPromptInputDocument(
+        nodes.doc.create(null, [paragraph("one"), paragraph("two")])
+      )
+    ).toBe("one\ntwo")
+  })
+
+  it("keeps cleared formatting editable without emitting sendable markers", () => {
+    for (const value of ["# x", "## x", "### x", "- x", "1. x"]) {
+      const document = createPromptInputDocument(value)
+      let state = EditorState.create({ doc: document })
+      state = state.apply(
+        state.tr.delete(
+          TextSelection.atStart(document).from,
+          TextSelection.atEnd(document).to
+        )
+      )
+      expect(readPromptInputDocument(state.doc), value).toBe("")
+      expect(state.doc.firstChild?.type).toBe(document.firstChild?.type)
+      state = state.apply(state.tr.insertText("again"))
+      expect(readPromptInputDocument(state.doc)).toBe(
+        value.replace("x", "again")
+      )
+    }
+  })
+
+  it("preserves blank draft whitespace without link or block syntax", () => {
+    const heading = promptInputSchema.nodes.heading.create({ level: 2 }, [
+      promptInputSchema.text(" \t", [
+        promptInputSchema.marks.link.create({ href: "https://example.com" }),
+      ]),
+      promptInputSchema.nodes.hard_break.create(),
+    ])
+    const document = promptInputSchema.nodes.doc.create(null, heading)
+    expect(readPromptInputDocument(document)).toBe(" \t\n")
+    expect(readPromptInputDocument(createPromptInputDocument(" \n\n "))).toBe(
+      " \n\n "
+    )
+  })
+
   it("keeps capability entities typed while serializing only user-authored text", () => {
     const document = createPromptInputDocument("first line\nsecond line", [
       webSearchEntity,

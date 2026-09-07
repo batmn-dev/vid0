@@ -15,12 +15,14 @@ those browser contracts while retaining a non-interactive textarea fallback.
 ## Decision
 
 `PromptInputTextarea` keeps its public component name for compatibility but
-renders a ProseMirror editor backed by a deliberately small schema: document,
-paragraph, text, and protected typed inline entities. Paragraph boundaries
-serialize to `\n`; entity atoms are presentation projections of typed Composer
-capabilities and never enter submitted text. Composer, draft persistence,
+renders a ProseMirror editor with paragraphs, headings (levels 1–3),
+strong/emphasis/link marks, lists, hard breaks, and protected typed inline
+entities. The draft remains a Markdown string; unformatted drafts retain exact
+whitespace and paragraph boundaries serialize to `\n`. Entity atoms are
+presentation projections of typed Composer capabilities and never enter
+submitted text. Composer, draft persistence,
 attachment handling, and Chat turn payloads therefore continue to own ordinary
-strings. The editor exposes only the imperative `focus`, `setSelectionRange`,
+strings. The editor exposes the imperative `focus`, `setSelectionRange`,
 and `replaceActionQuery` commands Composer already requires.
 
 The EditorView owns its DOM through a callback ref and is synchronized before
@@ -53,9 +55,9 @@ is a cursor-addressing sentinel, not content; allowing the global image reset
 to make it block-level would add a false line while deleting an entity spacer.
 
 A `display: none` textarea with fallback field attributes remains
-beside the contenteditable. The app also clones it transiently as the
-measurement surface for the existing bounded multiline expansion
-calculation.
+beside the contenteditable. The app clones the visible editing DOM at the derived compact width for
+multiline expansion, so hidden link destinations and Markdown delimiters
+cannot change the measured text width.
 
 ## Alternatives considered
 
@@ -64,8 +66,10 @@ calculation.
 - Build a hand-rolled contenteditable. Rejected because IME, undo, selection,
   paste, and browser mutation reconciliation would become local editor code.
 - Adopt a richer editor framework such as Tiptap or Lexical. Rejected because
-  the product contract is still a plain string and those layers add schema and
-  UI surface the composer does not need.
+  the existing ProseMirror editor already owns selection and entities.
+- Implement Markdown mark escaping or list transforms locally. Rejected after
+  literal punctuation, nested lists, and whitespace exposed round-trip errors.
+  Maintained ProseMirror packages supply these editing and serialization rules.
 
 ## Consequences
 
@@ -73,10 +77,41 @@ calculation.
 - The contenteditable DOM and selection survive controlled value updates.
 - Undo, IME, paragraph editing, and browser mutation reconciliation come from
   ProseMirror instead of local DOM code.
-- Rich marks and block types are intentionally unavailable. Typed atom entities
-  may project Composer capabilities without expanding the plain-string Chat
-  turn contract.
+- Rich formatting survives draft persistence and submission through Markdown.
+  The supported Markdown subset is restored using the existing remark parser;
+  unsupported blocks remain literal text. No parallel JSON draft is stored.
 - Capability selection, deletion, and undo remain Editor transactions, so the
   typed Composer state and protected DOM cannot diverge.
 - `prosemirror-model`, `prosemirror-state`, `prosemirror-view`, commands,
-  keymap, and history are direct client dependencies.
+  keymap, history, schema-list, inputrules, and markdown are direct client
+  dependencies.
+
+## Rich formatting interactions
+
+A ProseMirror plugin owns the selection toolbar and link editor. This keeps
+native selection, pressed state, focus restoration, and undo on the same
+transaction boundary as typing. The toolbar offers links, bold, italic,
+headings, and ordered/bulleted lists; link previews support edit, clear, copy,
+and open. Enter retains the existing send behavior. Shift+Enter continues a
+list or exits an empty item; after a heading it creates a paragraph. Standard
+input rules recognize heading/list prefixes and emphasis syntax.
+Blank formatted drafts serialize only their whitespace, so formatting markers
+cannot enable Send. Their active heading or list remains in the editor.
+An empty heading's placeholder uses paragraph typography and spacing, so the
+composer returns to its normal empty height before heading text is typed again.
+
+The Markdown boundary uses the maintained `prosemirror-markdown` inline
+serializer, including delimiter escaping and surrounding-whitespace handling.
+A small block adapter retains the composer's existing single-newline and empty
+paragraph behavior. Entity changes transact in place without reconstructing
+formatted content. Serialized-offset mappings resolve to text positions even
+inside nested list structure.
+List boundaries add the structural blank lines Markdown requires; parsing
+consumes those separators without adding empty editor paragraphs.
+
+Sent user messages render semantic React elements from this same parsed document.
+Unmarked paragraphs retain literal whitespace; headings, lists, and marks use
+the measured user-message styles. Re-parsing with the assistant's Markdown
+grammar was rejected because it interprets literal math and indented text
+differently from the composer. Copy and edit retain the canonical string, and
+editing reuses the composer with Enter inserting a line and Mod+Enter submitting.

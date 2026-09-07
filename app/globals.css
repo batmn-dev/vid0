@@ -682,6 +682,8 @@
   --control-track-bg: var(--secondary);
   --drawer-handle-bg: var(--secondary);
   --user-message-bg: oklch(0.934 0 0 / 0.502);
+  --theme-user-msg-bg: #e8f3fe;
+  --theme-user-msg-text: #0c274a;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -881,6 +883,8 @@
   --control-track-bg: var(--secondary);
   --drawer-handle-bg: var(--secondary);
   --user-message-bg: oklch(0.317 0 0 / 0.851);
+  --theme-user-msg-bg: #173e76;
+  --theme-user-msg-text: #f6fafe;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -1735,7 +1739,7 @@
     display: none !important;
   }
 
-  .wcDTda_prosemirror-parent p.placeholder {
+  .wcDTda_prosemirror-parent .placeholder {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1995,7 +1999,7 @@ code {
    auto containment; blocks without that measurement use the 3rem fallback.
    Guarded so browsers without content-visibility never see the size hint. */
 @supports (content-visibility: auto) {
-  .markdown > :not(:last-child):not(ol):not(ul):not(:has(ol, ul)) {
+  .markdown:not(.user-message-markdown) > :not(:last-child):not(ol):not(ul):not(:has(ol, ul)) {
     content-visibility: auto;
     contain-intrinsic-size: auto 3rem;
   }
@@ -2248,4 +2252,379 @@ code {
 
 [data-sonner-toaster] > li {
   width: 100%;
+}
+
+/* Sent user text inherits the bubble palette and the source's compact spacing. */
+.user-message-markdown {
+  color: inherit;
+  font-family: var(--font-native-stack);
+  font-variation-settings: "opsz" 16;
+  overflow-wrap: anywhere;
+  --tw-prose-body: currentColor;
+  --tw-prose-headings: currentColor;
+  --tw-prose-links: currentColor;
+  --tw-prose-bold: currentColor;
+  --tw-prose-counters: currentColor;
+  --tw-prose-bullets: currentColor;
+}
+.user-message-markdown > p {
+  margin-block: 0;
+}
+.user-message-markdown > p + p,
+.user-message-markdown > h1:not(:first-child),
+.user-message-markdown > p + :is(ul, ol),
+.user-message-markdown > :is(ul, ol) + :is(ul, ol, p) {
+  margin-top: 1rem;
+}
+.markdown.user-message-markdown > :last-child {
+  margin-bottom: 0;
+}
+.user-message-markdown h1 {
+  font-variation-settings: "opsz" 24;
+}
+.user-message-markdown h2 {
+  font-variation-settings: "opsz" 20;
+}
+.user-message-markdown h3 {
+  font-variation-settings: "opsz" 18;
+}
+.user-message-markdown :is(ul, ol) {
+  padding-inline-start: 20px;
+  list-style-position: outside;
+}
+.user-message-markdown ul {
+  list-style-type: disc;
+}
+.user-message-markdown ol {
+  list-style-type: decimal;
+}
+.user-message-markdown li {
+  margin-block: 0;
+  padding-inline-start: 4px;
+}
+.user-message-markdown ol > li::marker {
+  font-weight: 400;
+}
+.user-message-markdown strong {
+  font-weight: 600;
+}
+.user-message-preserved-blank-lines {
+  display: block;
+}
+.user-message-markdown a {
+  color: var(--link);
+  font-weight: 400;
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+.user-message-markdown a:hover {
+  color: var(--link-hover);
+}
+.user-message-collapse-toggle {
+  color: color-mix(in oklab, var(--theme-user-msg-text) 78%, var(--theme-user-msg-bg));
+}
+.user-message-collapse-toggle:hover {
+  color: var(--theme-user-msg-text);
+}
+.user-message-collapse-toggle:focus-visible {
+  outline: 2px solid var(--theme-user-msg-text);
+  outline-offset: 2px;
+}
+.user-message-edit-input [data-composer-surface] {
+  min-height: 0;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  contain: none;
+}
+.user-message-edit-input [data-composer-layout] {
+  display: block;
+  padding: 0;
+}
+.user-message-edit-input [data-composer-editor-wrapper] {
+  margin: 0;
+  padding: 0;
+}
+.user-message-edit-input [data-composer-editor-scroller] {
+  max-height: 25dvh;
+}
+.user-message-edit-input .ProseMirror {
+  margin: 0;
+  padding: 0;
+}
+.user-message-edit-input .ProseMirror :is(h1, h2, h3):not(:first-child) {
+  margin-top: 1rem;
+}
+.user-message-edit-input .ProseMirror
+  p:has(> .ProseMirror-trailingBreak:only-child) + :is(h1, h2, h3) {
+  margin-top: 0;
+}
+.user-message-edit-input .ProseMirror
+  :is(h1, h2, h3):has(+ p > .ProseMirror-trailingBreak:only-child) {
+  margin-bottom: 0;
+}
+
+/* Rich composer formatting uses the same editor metrics in every surface. */
+.composer-prosemirror {
+  --composer-selection-background: oklab(0.683658 -0.0373435 -0.152251 / 0.35);
+  font-family:
+    -apple-system-body,
+    ui-sans-serif,
+    -apple-system,
+    "system-ui",
+    "Segoe UI",
+    Helvetica,
+    "Apple Color Emoji",
+    Arial,
+    "sans-serif",
+    "Segoe UI Emoji",
+    "Segoe UI Symbol";
+}
+.composer-prosemirror :is(p, li, ul, ol) {
+  margin: 0;
+}
+.composer-prosemirror p {
+  min-height: 26px;
+}
+.composer-prosemirror h1 {
+  font-size: 24px;
+  font-variation-settings: "opsz" 24;
+  line-height: 32px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.composer-prosemirror h2 {
+  font-size: 20px;
+  font-variation-settings: "opsz" 20;
+  line-height: 28px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.composer-prosemirror h3 {
+  font-size: 18px;
+  font-variation-settings: "opsz" 18;
+  line-height: 28px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+/* Empty headings keep their format for typing, but use the normal empty box. */
+.composer-prosemirror > .placeholder {
+  min-height: var(--text-body-regular--line-height, 1.625rem);
+  margin: 0;
+  font-size: var(--text-body-regular, 1rem);
+  line-height: var(--text-body-regular--line-height, 1.625rem);
+  font-weight: var(--text-body-regular--font-weight, 400);
+  font-variation-settings: "opsz" var(--text-body-regular--optical-size, 16);
+  font-style: normal;
+  letter-spacing: normal;
+}
+.composer-prosemirror :is(ul, ol) {
+  padding-left: 20px;
+}
+.composer-prosemirror ul {
+  list-style-type: disc;
+}
+.composer-prosemirror ol {
+  list-style-type: decimal;
+}
+.composer-prosemirror strong {
+  font-weight: 700;
+}
+.composer-prosemirror em {
+  font-style: italic;
+}
+.composer-prosemirror a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: text;
+}
+.composer-format-toolbar {
+  --composer-format-surface: #fff;
+  --composer-format-hover: #f5f5f5;
+  --composer-format-accent: #3a83f7;
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--composer-format-surface);
+  color: var(--foreground);
+  box-shadow:
+    0 8px 12px #00000029,
+    0 0 1px #0009;
+  font-size: 14px;
+  line-height: 20px;
+}
+.dark .composer-format-toolbar {
+  --composer-format-surface: #353535;
+  --composer-format-hover: #454545;
+}
+.composer-format-toolbar[hidden] {
+  display: none;
+}
+.composer-format-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.composer-format-button > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.composer-format-button:hover,
+.composer-format-menu-item:hover,
+.composer-format-menu-item:focus-visible {
+  background: var(--composer-format-hover);
+}
+.composer-format-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.composer-format-text-button {
+  width: auto;
+  gap: 8px;
+  font-weight: 500;
+}
+.composer-format-styles-button {
+  gap: 4px;
+  padding-inline: 10px;
+}
+.composer-format-styles-button > svg {
+  width: 12px;
+  height: 12px;
+}
+.composer-format-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 192px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--composer-format-surface);
+  box-shadow:
+    0 8px 12px #00000029,
+    0 0 1px #0009;
+}
+.composer-format-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 4px 6px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+.composer-format-menu-h1 > span:first-child {
+  font-size: 16px;
+  line-height: 1.4285714286;
+  font-weight: 600;
+}
+.composer-format-menu-h2 > span:first-child {
+  font-size: 15px;
+  line-height: 1.4285714286;
+  font-weight: 600;
+}
+.composer-format-menu-h3 > span:first-child {
+  font-size: 14px;
+  font-weight: 600;
+}
+.composer-format-shortcut {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+.composer-format-link-input {
+  flex: 1;
+  width: 268px;
+  min-width: 0;
+  height: 28px;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  outline: none;
+  font-size: 14px;
+  line-height: 20px;
+}
+.composer-format-link-input[aria-invalid="true"] {
+  outline: 1px solid var(--destructive);
+  border-radius: 8px;
+}
+.composer-format-link-url {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-inline: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.composer-format-separator {
+  height: 12px;
+  width: 1px;
+  margin-inline: 4px;
+  background: var(--border);
+}
+.composer-format-button[aria-label="Apply link"] > svg {
+  width: 12px;
+  height: 12px;
+}
+
+.composer-format-apply-button,
+.composer-format-apply-button:hover {
+  width: 20px;
+  height: 20px;
+  margin-inline: 6px;
+  padding: 0;
+  border-radius: 9999px;
+  background: var(--composer-format-accent);
+  color: #f4f4f4;
+}
+.composer-format-apply-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.composer-format-menu-item[aria-checked="true"] {
+  background: var(--composer-format-hover);
+}
+.composer-format-menu-item:focus-visible {
+  outline: none;
+}
+
+.composer-format-button[aria-pressed="true"] > svg {
+  color: var(--composer-format-accent);
+}
+
+.composer-format-preserved-selection {
+  background: var(--composer-selection-background);
+  color: inherit;
+}
+.dark .composer-prosemirror {
+  --composer-selection-background: oklab(0.625496 -0.0344569 -0.185237 / 0.6);
+}
+.dark .composer-format-preserved-selection {
+  color: white;
 }

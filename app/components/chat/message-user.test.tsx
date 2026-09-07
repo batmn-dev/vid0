@@ -13,6 +13,10 @@ beforeAll(() => {
   ;(
     globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true
+  Object.defineProperties(Range.prototype, {
+    getBoundingClientRect: { configurable: true, value: () => new DOMRect() },
+    getClientRects: { configurable: true, value: () => [] },
+  })
 })
 
 describe("MessageUser attachments", () => {
@@ -209,7 +213,7 @@ describe("MessageUser edits", () => {
           isEditing={isEditing}
           onEditingChange={setIsEditing}
         >
-          Original text
+          {props.children ?? "Original text"}
         </MessageUser>
       )
     }
@@ -231,15 +235,22 @@ describe("MessageUser edits", () => {
   }
 
   function updateTextarea(value: string) {
-    const textarea = container?.querySelector<HTMLTextAreaElement>("textarea")
-    expect(textarea).toBeTruthy()
-    const valueSetter = Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      "value"
-    )?.set
-    valueSetter?.call(textarea, value)
+    const editor = container?.querySelector<HTMLElement>(
+      '[contenteditable="true"]'
+    )
+    expect(editor).toBeTruthy()
     act(() => {
-      textarea?.dispatchEvent(new Event("input", { bubbles: true }))
+      editor?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, key: "a", ctrlKey: true })
+      )
+      const paste = new Event("paste", { bubbles: true, cancelable: true })
+      Object.defineProperty(paste, "clipboardData", {
+        value: {
+          getData: (type: string) => (type === "text/plain" ? value : ""),
+          files: [],
+        },
+      })
+      editor?.dispatchEvent(paste)
     })
   }
 
@@ -298,7 +309,9 @@ describe("MessageUser edits", () => {
     const editor = container?.firstElementChild
     const scrollOwner = editor?.children[0]
     const textarea = container?.querySelector("textarea")
-    const sizingSpan = textarea?.nextElementSibling
+    const richEditor = container?.querySelector<HTMLElement>(
+      '[contenteditable="true"]'
+    )
     const actionRow = editor?.lastElementChild
 
     expect(editor?.className).toContain("rounded-3xl")
@@ -314,22 +327,117 @@ describe("MessageUser edits", () => {
       container?.querySelector('[aria-label="Your message actions"]')
     ).toBeNull()
     expect(textarea?.getAttribute("aria-label")).toBe("Edit message")
-    expect(textarea?.className).toContain(
-      "col-start-1 col-end-2 row-start-1 row-end-2"
-    )
-    expect(textarea?.className).toContain(
-      "w-full resize-none overflow-hidden p-0 m-0 w-full resize-none border-0 bg-transparent focus:ring-0 focus-visible:ring-0"
-    )
-    expect(textarea?.getAttribute("style")).toBeNull()
-    expect(sizingSpan?.className).toContain("invisible")
-    expect(sizingSpan?.className).toContain("whitespace-pre-wrap")
+    expect(textarea?.style.display).toBe("none")
+    expect(richEditor?.getAttribute("aria-label")).toBe("Edit message")
+    expect(richEditor?.id).toBe("message-edit-msg-client-123")
+    expect(richEditor?.textContent).toBe("Original text")
     expect(actionRow?.className).toBe(
       "flex flex-wrap justify-end gap-2 px-2 pt-2"
     )
-    expect(document.activeElement).toBe(textarea)
-    expect((textarea as HTMLTextAreaElement | undefined)?.selectionStart).toBe(
-      "Original text".length
+    expect(document.activeElement).toBe(richEditor)
+    expect(document.getSelection()?.anchorOffset).toBe("Original text".length)
+  })
+
+  it("renders formatted messages and edits the same Markdown document", async () => {
+    const source = "# Heading\n\n## Subheading\n\n- Point\n\n*Emphasis*"
+    const onEdit = vi.fn(async () => ({ ok: true }) as const)
+    const copyToClipboard = vi.fn()
+    renderEditableMessage({ children: source, onEdit, copyToClipboard })
+    expect(container?.querySelector("h1")?.textContent).toBe("Heading")
+    expect(container?.querySelector("h2")?.textContent).toBe("Subheading")
+    expect(container?.querySelector("li")?.textContent).toBe("Point")
+    expect(container?.querySelector("em")?.textContent).toBe("Emphasis")
+    act(() =>
+      container
+        ?.querySelector('[aria-label="Copy message"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     )
+    expect(copyToClipboard).toHaveBeenCalledOnce()
+    openEditor()
+    const editor = container?.querySelector('[contenteditable="true"]')
+    expect(editor?.querySelector("h1")?.textContent).toBe("Heading")
+    expect(editor?.querySelector("li p")?.textContent).toBe("Point")
+    await clickSend()
+    expect(onEdit).toHaveBeenCalledWith("msg-client-123", source)
+  })
+
+  it("keeps canonical literal Markdown and blank lines in the plain message surface", () => {
+    renderEditableMessage({ children: "  \\# literal\n\n\n\\*stars\\*  " })
+    const content = container?.querySelector(
+      '[data-testid="collapsible-user-message-content"]'
+    )
+    expect(content?.textContent).toBe("  # literal\n\n\n*stars*  ")
+    expect(content?.querySelector(".markdown")).toBeNull()
+    expect(content?.firstElementChild?.className).toContain(
+      "whitespace-pre-wrap"
+    )
+  })
+
+  it("preserves authored marks, literal syntax, and blank paragraphs together", () => {
+    renderEditableMessage({
+      children: "    **code**\n\n\n$$x$$ and ~~literal~~",
+    })
+    const content = container?.querySelector(".user-message-markdown")
+    expect(content?.querySelector("strong")?.textContent).toBe("code")
+    expect(content?.querySelector("p")?.textContent).toBe("    code")
+    expect(
+      content
+        ?.querySelector("[data-preserved-blank-lines]")
+        ?.getAttribute("data-preserved-blank-lines")
+    ).toBe("1")
+    expect(content?.lastElementChild?.textContent).toBe("$$x$$ and ~~literal~~")
+    expect(content?.querySelector(".katex, del, pre")).toBeNull()
+  })
+
+  it("keeps links semantic and excludes unsafe destinations", () => {
+    renderEditableMessage({
+      children:
+        "**See** [Example](https://example.com), [Call](tel:+15551234567), and [unsafe](javascript:alert%281%29)",
+    })
+    const link = container?.querySelector(".user-message-markdown a")
+    expect(link?.textContent).toBe("Example")
+    expect(link?.getAttribute("href")).toBe("https://example.com")
+    expect(
+      container?.querySelector('a[href="tel:+15551234567"]')?.textContent
+    ).toBe("Call")
+    expect(container?.querySelector('a[href^="javascript:"]')).toBeNull()
+  })
+
+  it("keeps bold and italic marks inside their shared link", () => {
+    renderEditableMessage({
+      children: "[***Bold italic***](https://example.com)",
+    })
+    const link = container?.querySelector(".user-message-markdown p > a")
+    expect(link?.getAttribute("href")).toBe("https://example.com")
+    expect(link?.querySelector("strong > em")?.textContent).toBe("Bold italic")
+  })
+
+  it("saves formatting applied in the rich message editor", async () => {
+    const onEdit = vi.fn(async () => ({ ok: true }) as const)
+    renderEditableMessage({ onEdit })
+    openEditor()
+    const editor = container?.querySelector('[contenteditable="true"]')
+    act(() => {
+      editor?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "a",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      )
+      editor?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "b",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      )
+    })
+    expect(editor?.querySelector("strong")?.textContent).toBe("Original text")
+    await clickSend()
+    expect(onEdit).toHaveBeenCalledWith("msg-client-123", "**Original text**")
   })
 
   it("uses ChatGPT's edit keyboard contract", async () => {
@@ -337,12 +445,18 @@ describe("MessageUser edits", () => {
     renderEditableMessage({ onEdit })
     openEditor()
 
-    const textarea = container?.querySelector<HTMLTextAreaElement>("textarea")
+    const textarea = container?.querySelector<HTMLElement>(
+      '[contenteditable="true"]'
+    )
     expect(textarea).toBeTruthy()
 
     act(() => {
       textarea?.dispatchEvent(
-        new KeyboardEvent("keydown", { bubbles: true, key: "Enter" })
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Enter",
+          cancelable: true,
+        })
       )
     })
     expect(onEdit).not.toHaveBeenCalled()
@@ -353,11 +467,12 @@ describe("MessageUser edits", () => {
           bubbles: true,
           key: "Enter",
           metaKey: true,
+          cancelable: true,
         })
       )
     })
 
-    expect(onEdit).toHaveBeenCalledWith("msg-client-123", "Original text")
+    expect(onEdit).toHaveBeenCalledWith("msg-client-123", "Original text\n")
     expect(container?.querySelector("textarea")).toBeNull()
   })
 

@@ -1,6 +1,5 @@
 "use client"
 
-import { AutosizeTextarea } from "@/components/ui/autosize-textarea"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import {
@@ -16,18 +15,20 @@ import {
   MorphingDialogTitle,
   MorphingDialogTrigger,
 } from "@/components/ui/morphing-dialog"
+import {
+  PromptInput,
+  PromptInputTextarea,
+  type PromptInputEditorHandle,
+} from "@/components/ui/prompt-input"
+import { createPromptInputDocument } from "@/components/ui/prompt-input-schema"
 import type { MessageBranchInfo } from "@/lib/chat-messages/branch"
 import type { EditTurnResult } from "@/lib/chat-turn/chat-turn-controller"
 import { cn } from "@/lib/utils"
-import {
-  RiCheckLine,
-  RiEditLine,
-  RiFileCopyLine,
-  RiFileLine,
-  RiFileTextLine,
-} from "@remixicon/react"
+import { RiCheckLine, RiFileLine, RiFileTextLine } from "@remixicon/react"
 import Image from "next/image"
-import React, { useCallback, useId, useRef, useState } from "react"
+import type { Node as ProseMirrorNode } from "prosemirror-model"
+import React, { useCallback, useId, useMemo, useRef, useState } from "react"
+import { defaultUrlTransform } from "react-markdown"
 import { MessageActionButton } from "./message-action-button"
 import { MessageBranchControls } from "./message-branch-controls"
 
@@ -126,6 +127,46 @@ function MessageAttachmentView({
   )
 }
 
+function CopyUserMessageIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      focusable="false"
+      aria-hidden="true"
+      fill="currentColor"
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M15.1006 1.78516C16.793 1.78556 18.165 3.15808 18.165 4.85059V10.8838C18.1649 12.5762 16.7929 13.9478 15.1006 13.9482H13.998V15.0508C13.9976 16.7431 12.626 18.1151 10.9336 18.1152H4.90039C3.20789 18.1152 1.83537 16.7432 1.83496 15.0508V9.01758C1.83496 7.32482 3.20764 5.95215 4.90039 5.95215H6.00195V4.85059C6.00195 3.15783 7.37463 1.78516 9.06738 1.78516H15.1006ZM4.90039 7.28223C3.94218 7.28223 3.16504 8.05936 3.16504 9.01758V15.0508C3.16544 16.0087 3.94243 16.7852 4.90039 16.7852H10.9336C11.8914 16.785 12.6676 16.0086 12.668 15.0508V9.01758C12.668 8.05945 11.8917 7.28237 10.9336 7.28223H4.90039ZM9.06738 3.11523C8.10917 3.11523 7.33203 3.89237 7.33203 4.85059V5.95215H10.9336C12.6262 5.95229 13.998 7.32491 13.998 9.01758V12.6182H15.1006C16.0584 12.6178 16.8348 11.8416 16.835 10.8838V4.85059C16.835 3.89262 16.0585 3.11564 15.1006 3.11523H9.06738Z"
+      />
+    </svg>
+  )
+}
+
+function EditUserMessageIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      focusable="false"
+      aria-hidden="true"
+      fill="currentColor"
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M11.6258 3.30375C13.0516 1.88123 15.3202 1.91012 16.6805 3.29496C18.0834 4.64996 18.1292 6.92825 16.6893 8.36821L9.68929 15.3682L9.68832 15.3672C8.9762 16.1131 8.0665 16.6184 7.11605 16.8389L7.11507 16.8399L3.24789 17.7276L3.24691 17.7256C3.08016 17.7653 2.74207 17.799 2.4725 17.5303C2.20162 17.2601 2.23613 16.9199 2.27621 16.753H2.27425L3.1639 12.8956C3.38813 11.8986 3.89924 11.028 4.6014 10.3272L11.6258 3.30375ZM5.54183 11.2686C5.00143 11.8078 4.62462 12.4592 4.46078 13.1905L4.4598 13.1944L3.7557 16.2461L6.81722 15.543C7.52306 15.3789 8.20539 15.0001 8.73617 14.4405L14.3944 8.78129L11.2118 5.5977L5.54183 11.2686ZM15.742 4.23637C14.9045 3.37296 13.4757 3.3368 12.5653 4.24516L12.1522 4.65727L15.3348 7.84086L15.7489 7.42778C16.6655 6.51112 16.6228 5.08792 15.7577 4.252L15.742 4.23637Z"
+      />
+    </svg>
+  )
+}
+
 function SharePromptIcon() {
   return (
     <svg
@@ -160,6 +201,126 @@ function CollapsibleUserMessageChevron() {
 }
 
 const collapsedMessageMaxHeight = 264
+
+function renderUserMessageNode(
+  node: ProseMirrorNode,
+  key: number
+): React.ReactNode {
+  if (node.isText) {
+    let content: React.ReactNode = node.text
+    for (const mark of [...node.marks].reverse()) {
+      if (mark.type.name === "strong") content = <strong>{content}</strong>
+      if (mark.type.name === "em") content = <em>{content}</em>
+    }
+    const link = node.marks.find((mark) => mark.type.name === "link")
+    if (link) {
+      const destination = String(link.attrs.href)
+      const href = /^tel:/i.test(destination)
+        ? destination
+        : defaultUrlTransform(destination)
+      if (href) {
+        content = (
+          <a href={href} target="_blank" rel="noopener noreferrer">
+            {content}
+          </a>
+        )
+      }
+    }
+    return <React.Fragment key={key}>{content}</React.Fragment>
+  }
+  if (node.type.name === "hard_break") return <br key={key} />
+
+  const children: React.ReactNode[] = []
+  let emptyParagraphs = 0
+  const appendBlankLines = (index: number) => {
+    if (emptyParagraphs > 1) {
+      children.push(
+        <span
+          key={`blank-${index}`}
+          aria-hidden="true"
+          className="user-message-preserved-blank-lines"
+          data-preserved-blank-lines={emptyParagraphs - 1}
+          style={{ height: `${emptyParagraphs - 1}lh` }}
+        />
+      )
+    }
+    emptyParagraphs = 0
+  }
+  const tightItem =
+    node.type.name === "list_item" &&
+    Array.from({ length: node.childCount }, (_, index) =>
+      node.child(index)
+    ).filter((child) => child.type.name === "paragraph").length === 1
+  node.forEach((child, _offset, index) => {
+    if (
+      node.type.name === "doc" &&
+      child.type.name === "paragraph" &&
+      child.content.size === 0
+    ) {
+      emptyParagraphs += 1
+      return
+    }
+    // The first empty paragraph is Markdown separation; further ones paint gaps.
+    appendBlankLines(index)
+    // The reference omits paragraph wrappers inside tight list items.
+    if (tightItem && child.type.name === "paragraph") {
+      const inlineContent: React.ReactNode[] = []
+      child.forEach((inline, _inlineOffset, inlineIndex) => {
+        inlineContent.push(renderUserMessageNode(inline, inlineIndex))
+      })
+      children.push(
+        <React.Fragment key={index}>{inlineContent}</React.Fragment>
+      )
+    } else {
+      children.push(renderUserMessageNode(child, index))
+    }
+  })
+  appendBlankLines(node.childCount)
+  switch (node.type.name) {
+    case "paragraph":
+      return <p key={key}>{children.length ? children : <br />}</p>
+    case "heading":
+      return React.createElement(`h${node.attrs.level}`, { key }, children)
+    case "bullet_list":
+      return <ul key={key}>{children}</ul>
+    case "ordered_list":
+      return (
+        <ol
+          key={key}
+          start={node.attrs.order === 1 ? undefined : Number(node.attrs.order)}
+        >
+          {children}
+        </ol>
+      )
+    case "list_item":
+      return <li key={key}>{children}</li>
+    default:
+      return <React.Fragment key={key}>{children}</React.Fragment>
+  }
+}
+
+function UserMessageContent({ children }: { children: string }) {
+  const doc = useMemo(() => createPromptInputDocument(children), [children])
+  let plain = true
+  doc.descendants((node) => {
+    if (
+      !["paragraph", "text", "hard_break"].includes(node.type.name) ||
+      node.marks.length
+    ) {
+      plain = false
+    }
+  })
+
+  return plain ? (
+    <div className="max-w-full min-w-0 [overflow-wrap:anywhere] whitespace-pre-wrap">
+      {doc.textBetween(0, doc.content.size, "\n", "\n")}
+    </div>
+  ) : (
+    <div className="markdown user-message-markdown">
+      {renderUserMessageNode(doc, 0)}
+    </div>
+  )
+}
 
 function CollapsibleUserMessage({ children }: { children: string }) {
   const contentId = useId()
@@ -204,16 +365,14 @@ function CollapsibleUserMessage({ children }: { children: string }) {
             "max-h-[264px] overflow-clip [mask-image:linear-gradient(#000_calc(100%_-_48px),transparent)]"
         )}
       >
-        <div className="max-w-full min-w-0 [overflow-wrap:anywhere] whitespace-pre-wrap">
-          {children}
-        </div>
+        <UserMessageContent>{children}</UserMessageContent>
       </div>
       {canExpand && (
         <button
           type="button"
           aria-controls={contentId}
           aria-expanded={isExpanded}
-          className="text-muted-foreground mt-2 flex w-fit items-center gap-1 rounded-md py-0.5 text-sm leading-5 font-medium select-none"
+          className="user-message-collapse-toggle mt-2 flex w-fit items-center gap-1 rounded-md py-0.5 text-sm leading-5 font-medium select-none"
           data-testid="collapsible-user-message-toggle"
           onClick={() => setIsExpanded((expanded) => !expanded)}
         >
@@ -262,6 +421,7 @@ function UserMessageBubble({
 }
 
 function UserMessageEditor({
+  id,
   attachments,
   editError,
   editInput,
@@ -269,6 +429,7 @@ function UserMessageEditor({
   onChange,
   onSave,
 }: {
+  id: string
   attachments?: MessageAttachment[]
   editError: string | null
   editInput: string
@@ -276,15 +437,18 @@ function UserMessageEditor({
   onChange: (value: string) => void
   onSave: () => void
 }) {
-  const focusEditor = useCallback((textarea: HTMLTextAreaElement | null) => {
-    if (!textarea) return
-    textarea.focus({ preventScroll: true })
-    const end = textarea.value.length
-    textarea.setSelectionRange(end, end)
+  const initialValue = useRef(editInput)
+  const focusEditor = useCallback((editor: PromptInputEditorHandle | null) => {
+    if (!editor) return
+    editor.focus({ preventScroll: true })
+    editor.setSelectionRange(
+      initialValue.current.length,
+      initialValue.current.length
+    )
   }, [])
 
   return (
-    <div className="font-native bg-secondary rounded-3xl px-3 py-3">
+    <div className="user-message-editor font-native bg-secondary rounded-3xl px-3 py-3">
       {attachments && attachments.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {attachments.map((attachment, index) => (
@@ -303,28 +467,35 @@ function UserMessageEditor({
             message before the request settles (reference: ChatGPT), so the
             editor never gets to show a lock. Double submits are caught in
             handleSave. */}
-        <AutosizeTextarea
-          ref={focusEditor}
-          aria-label="Edit message"
-          className="m-0 w-full resize-none border-0 bg-transparent focus:ring-0 focus-visible:ring-0"
+        <PromptInput
+          className="user-message-edit-input"
           value={editInput}
-          onChange={(event) => onChange(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return
-            if (
-              event.key === "Enter" &&
-              (event.metaKey || event.ctrlKey) &&
-              !event.shiftKey
-            ) {
-              event.preventDefault()
-              onSave()
-              return
-            }
-            if (event.key === "Escape" && !event.defaultPrevented) {
-              onCancel()
-            }
-          }}
-        />
+          onValueChange={onChange}
+        >
+          <PromptInputTextarea
+            ref={focusEditor}
+            id={`message-edit-${id}`}
+            aria-label="Edit message"
+            disableAutosize
+            submitOnEnter={false}
+            onKeyDown={(event) => {
+              if (event.isComposing) return
+              if (
+                event.key === "Enter" &&
+                (event.metaKey || event.ctrlKey) &&
+                !event.shiftKey
+              ) {
+                event.preventDefault()
+                onSave()
+                return
+              }
+              if (event.key === "Escape" && !event.defaultPrevented) {
+                event.preventDefault()
+                onCancel()
+              }
+            }}
+          />
+        </PromptInput>
         {editError ? (
           <p className="text-destructive mt-2 text-sm" role="alert">
             {editError}
@@ -442,6 +613,7 @@ export function MessageUser({
   if (isEditing) {
     return (
       <UserMessageEditor
+        id={id}
         attachments={attachments}
         editError={editError}
         editInput={editInput}
@@ -507,7 +679,7 @@ export function MessageUser({
               copied ? (
                 <Icon icon={RiCheckLine} slotSize={20} />
               ) : (
-                <Icon icon={RiFileCopyLine} slotSize={20} />
+                <CopyUserMessageIcon />
               )
             }
           />
@@ -523,7 +695,7 @@ export function MessageUser({
             <MessageActionButton
               label="Edit message"
               onClick={handleEditStart}
-              icon={<Icon icon={RiEditLine} slotSize={20} />}
+              icon={<EditUserMessageIcon />}
             />
           )}
           {/* Branch nav reveals with the footer actions to match the captured

@@ -321,8 +321,32 @@ function getCompactEditorWidth(textarea: HTMLTextAreaElement) {
 function measureTextareaScrollHeight(
   textarea: HTMLTextAreaElement,
   value: string,
-  width: number
+  width: number,
+  editor?: HTMLElement
 ) {
+  if (editor) {
+    const clone = editor.cloneNode(true) as HTMLElement
+    clone.removeAttribute("id")
+    clone.removeAttribute("contenteditable")
+    clone.setAttribute("aria-hidden", "true")
+    Object.assign(clone.style, {
+      position: "absolute",
+      visibility: "hidden",
+      pointerEvents: "none",
+      width: `${width}px`,
+      height: "auto",
+      minHeight: "0",
+      maxHeight: "none",
+      top: "0",
+      left: "0",
+      margin: "0",
+      padding: "0 0 16px",
+    })
+    document.body.appendChild(clone)
+    const height = clone.scrollHeight
+    clone.remove()
+    return height
+  }
   const clone = textarea.cloneNode() as HTMLTextAreaElement
   clone.removeAttribute("id")
   clone.removeAttribute("name")
@@ -360,10 +384,12 @@ const COLLAPSED_EDITOR_HEIGHT = 42
 const EXPANSION_MEASURE_CHAR_LIMIT = 2000
 
 function getEditorAttributes({
+  id,
   ariaLabel,
   className,
   disabled,
 }: {
+  id: string
   ariaLabel?: string
   className?: string
   disabled: boolean
@@ -380,7 +406,7 @@ function getEditorAttributes({
       className
     ),
     "data-virtualkeyboard": "true",
-    id: "prompt-textarea",
+    id,
     inputmode: "text",
     role: "textbox",
     spellcheck: "true",
@@ -389,7 +415,9 @@ function getEditorAttributes({
 }
 
 export type PromptInputTextareaProps = {
+  id?: string
   disableAutosize?: boolean
+  submitOnEnter?: boolean
   containerClassName?: string
   className?: string
   placeholder?: string
@@ -407,12 +435,14 @@ const PromptInputTextarea = React.forwardRef<
   PromptInputTextareaProps
 >(function PromptInputTextarea(
   {
+    id = "prompt-textarea",
     className,
     containerClassName,
     onActionQueryChange,
     onKeyDown,
     onPaste,
     disableAutosize = false,
+    submitOnEnter = true,
     style,
     placeholder,
     "aria-label": ariaLabel,
@@ -438,6 +468,7 @@ const PromptInputTextarea = React.forwardRef<
   const fallbackTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const forwardedRef = useRef(ref)
   const callbacks = useRef({
+    id,
     ariaLabel,
     autoFocus,
     className,
@@ -445,6 +476,7 @@ const PromptInputTextarea = React.forwardRef<
     onActionQueryChange,
     onKeyDown,
     onPaste,
+    submitOnEnter,
     onSubmit,
     placeholder,
     setValue,
@@ -456,6 +488,7 @@ const PromptInputTextarea = React.forwardRef<
 
   useBrowserLayoutEffect(() => {
     callbacks.current = {
+      id,
       ariaLabel,
       autoFocus,
       className,
@@ -463,6 +496,7 @@ const PromptInputTextarea = React.forwardRef<
       onActionQueryChange,
       onKeyDown,
       onPaste,
+      submitOnEnter,
       onSubmit,
       placeholder,
       setValue,
@@ -478,6 +512,7 @@ const PromptInputTextarea = React.forwardRef<
       assignRef(ref, editorHandleRef.current)
     }
   }, [
+    id,
     ariaLabel,
     autoFocus,
     className,
@@ -486,6 +521,7 @@ const PromptInputTextarea = React.forwardRef<
     onActionQueryChange,
     onKeyDown,
     onPaste,
+    submitOnEnter,
     onSubmit,
     placeholder,
     ref,
@@ -512,10 +548,19 @@ const PromptInputTextarea = React.forwardRef<
         return
       }
 
+      if (!viewRef.current) return
+
       // Native field sizing keeps the live editor matched to its rendered
       // lines. Clear a stale imperative height left by an older render/HMR;
       // the nested scroller below, not the textarea, owns the height cap.
       textarea.style.removeProperty("height")
+
+      const richBlock =
+        viewRef.current?.state.doc.firstChild?.type.name !== "paragraph"
+      if (richBlock && nextValue) {
+        setTextareaExpanded(true)
+        return
+      }
 
       if (!nextValue || nextValue.includes("\n")) {
         setTextareaExpanded(Boolean(nextValue))
@@ -557,7 +602,12 @@ const PromptInputTextarea = React.forwardRef<
         previous.style === style &&
         previous.typography === typography
           ? previous.height
-          : measureTextareaScrollHeight(textarea, measuredValue, compactWidth)
+          : measureTextareaScrollHeight(
+              textarea,
+              measuredValue,
+              compactWidth,
+              viewRef.current?.dom
+            )
       measuredLayout.current = {
         textarea,
         value: measuredValue,
@@ -668,6 +718,7 @@ const PromptInputTextarea = React.forwardRef<
         { mount: node },
         {
           attributes: getEditorAttributes({
+            id: callbacks.current.id,
             ariaLabel: callbacks.current.ariaLabel,
             className: callbacks.current.className,
             disabled: callbacks.current.disabled,
@@ -714,15 +765,20 @@ const PromptInputTextarea = React.forwardRef<
               return false
             }
 
-            if (event.key === "Enter" && !event.shiftKey) {
+            callbacks.current.onKeyDown?.(event)
+            if (event.defaultPrevented) return true
+
+            if (
+              callbacks.current.submitOnEnter &&
+              event.key === "Enter" &&
+              !event.shiftKey
+            ) {
               event.preventDefault()
               callbacks.current.onSubmit?.()
-              callbacks.current.onKeyDown?.(event)
               return true
             }
 
-            callbacks.current.onKeyDown?.(event)
-            return event.defaultPrevented
+            return false
           },
           handlePaste(_view, event) {
             if (callbacks.current.disabled) return false
@@ -785,6 +841,7 @@ const PromptInputTextarea = React.forwardRef<
 
     view.setProps({
       attributes: getEditorAttributes({
+        id,
         ariaLabel,
         className,
         disabled: disabled ?? disabledProp ?? false,
@@ -800,6 +857,7 @@ const PromptInputTextarea = React.forwardRef<
     paintControllerRef.current?.onComposerUpdate()
   }, [
     applyEditorLayout,
+    id,
     ariaLabel,
     className,
     disabled,
