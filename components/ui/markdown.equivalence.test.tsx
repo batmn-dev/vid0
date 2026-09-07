@@ -18,7 +18,6 @@
 // through render-phase state adjustment, which StrictMode double-invokes.
 
 import { buildMarkdownPayload } from "@/benchmarks/chat-performance/fixtures"
-import { GROWING_HIGHLIGHT_IDLE_MS } from "@/lib/chat-performance/streaming-code-render"
 import {
   EQUIVALENCE_FIXTURES,
   seededPrefixOffsets,
@@ -149,7 +148,7 @@ function mount(
 
 async function flushHighlights() {
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(GROWING_HIGHLIGHT_IDLE_MS + 10)
+    await vi.advanceTimersByTimeAsync(0)
   })
 }
 

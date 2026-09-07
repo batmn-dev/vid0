@@ -5,12 +5,10 @@
 // The stability rule under test — a code block is `growing` iff it is the
 // TERMINAL parsed block AND the message is live (`streaming` prop) — is
 // classified in markdown.tsx and consumed by CodeBlockCode, whose growing
-// blocks highlight after GROWING_HIGHLIGHT_IDLE_MS without another tuple
-// change while stable blocks highlight immediately. Shiki is mocked, so
+// blocks stay plain while stable blocks highlight immediately. Shiki is mocked, so
 // highlight calls are exact; there is deliberately no fence parser, so an
 // unclosed terminal fence settles the moment the message does.
 
-import { GROWING_HIGHLIGHT_IDLE_MS } from "@/lib/chat-performance/streaming-code-render"
 import * as growingBlockTail from "@/lib/markdown/growing-block-tail"
 import * as streamingDecay from "@/lib/markdown/streaming-decay-overlay"
 import React, { act } from "react"
@@ -155,20 +153,20 @@ describe("Markdown terminal-block stability", () => {
 
   it("never requests Shiki for a no-code conversation", async () => {
     const view = mount("STREAM-START\n\nPlain prose only.", true)
-    await advance(GROWING_HIGHLIGHT_IDLE_MS * 2)
+    await advance(1000)
     view.rerender(
       "STREAM-START\n\nPlain prose only, still growing.\n\nSTREAM-END",
       false
     )
-    await advance(GROWING_HIGHLIGHT_IDLE_MS * 2)
+    await advance(1000)
     expect(shikiMock.highlightCode).not.toHaveBeenCalled()
   })
 
-  it("highlights stable code immediately and growing code only after idle", async () => {
+  it("highlights stable code immediately and leaves growing code plain through pauses", async () => {
     const view = mount(multiFenceStreaming, true)
     await advance(10)
     // The completed first fence is stable and immediate; the growing terminal
-    // fence remains plain until its idle boundary.
+    // fence remains plain while the message is live.
     expect(shikiMock.highlightCode).toHaveBeenCalledTimes(1)
     expect(shikiMock.highlightCode).toHaveBeenCalledWith(
       expect.objectContaining({ code: `${firstFence}\n`, language: "ts" })
@@ -182,19 +180,15 @@ describe("Markdown terminal-block stability", () => {
       "``` inner backticks ```"
     )
 
-    // A delta restarts the growing fence's idle boundary. The stable first
-    // fence never re-highlights (content
-    // unchanged, block memoized).
+    // Neither another delta nor a long pause highlights the growing block.
+    // The stable first fence remains memoized.
     const grown = multiFenceStreaming + "\nconst third = 3"
     view.rerender(grown, true)
     expect(shikiMock.highlightCode).toHaveBeenCalledTimes(1)
-    await advance(GROWING_HIGHLIGHT_IDLE_MS + 10)
-    expect(shikiMock.highlightCode).toHaveBeenCalledTimes(2)
-    expect(shikiMock.highlightCode).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        code: expect.stringContaining("const third = 3"),
-        language: "ts",
-      })
+    await advance(1000)
+    expect(shikiMock.highlightCode).toHaveBeenCalledTimes(1)
+    expect(codeBlocks?.[1]?.querySelector("pre code")?.textContent).toContain(
+      "const third = 3"
     )
   })
 
@@ -346,7 +340,7 @@ describe("Markdown terminal-block stability", () => {
     streamed.render(false)
     const control = mountInto()
     control.render(false)
-    await advance(GROWING_HIGHLIGHT_IDLE_MS + 10)
+    await advance(1000)
     // base-ui autogenerates per-instance tooltip ids; they differ between
     // mounts regardless of the streaming path — normalize before comparing.
     const normalize = (html: string) =>
@@ -496,7 +490,7 @@ describe("Markdown terminal-block stability", () => {
     // Closing the fence and settling lands on the normal pipeline's DOM:
     // same wrapper classes, same header label, full code highlighted.
     view.rerender("```ts\n" + lines + "\nconst extra = 99\n```\n", false)
-    await advance(GROWING_HIGHLIGHT_IDLE_MS * 2)
+    await advance(1000)
     const settledBlock = container?.querySelector(".markdown-code-block")
     expect(settledBlock).not.toBeNull()
     expect(settledBlock?.className).toContain("language-ts")
@@ -521,10 +515,8 @@ describe("Markdown terminal-block stability", () => {
       const growingBlock = container?.querySelector(".markdown-code-block")
       expect(growingBlock?.className).toContain(`language-${language}`)
       expect(growingBlock?.textContent).toContain(label)
-      await advance(GROWING_HIGHLIGHT_IDLE_MS + 10)
-      expect(shikiMock.highlightCode).toHaveBeenLastCalledWith(
-        expect.objectContaining({ language })
-      )
+      await advance(1000)
+      expect(shikiMock.highlightCode).not.toHaveBeenCalled()
 
       view.rerender(`\`\`\`${language}\n${code}\n\`\`\`\n`, false)
       await advance(10)

@@ -4414,6 +4414,89 @@ describe("stopGenerationRun", () => {
     return fixture
   }
 
+  it("retains the displayed prefix ahead of the next checkpoint without replacing server parts", async () => {
+    const fixture = makeStoppableFixture()
+    const tool = {
+      type: "tool-web_search",
+      toolCallId: "call_1",
+      state: "output-available",
+      output: { result: "server" },
+    }
+    const text = {
+      type: "text",
+      text: "1.",
+      providerMetadata: { google: { thoughtSignature: "server-signature" } },
+    }
+    fixture.message.content = "1."
+    fixture.message.parts = [tool, text]
+    const observedText = "1." + "x".repeat(164)
+    const { ctx } = createMutationCtx(fixture.tables)
+
+    await stopGenerationRunForChat(ctx, fixture, { observedText })
+
+    expect(fixture.message.content).toBe(observedText)
+    expect(fixture.message.parts).toEqual([tool, { ...text, text: observedText }])
+    expect(fixture.message.status).toBe("aborted")
+    expect(fixture.message.metadata?.reasoningDurationMs).toBe(436)
+    expect(fixture.run.grantDigest).toBeUndefined()
+  })
+
+  it("retains visible text before the first checkpoint instead of deleting the empty sibling", async () => {
+    const fixture = makeStoppableFixture()
+    fixture.message.content = ""
+    fixture.message.parts = []
+    fixture.otherMessage.content = "prior answer"
+    fixture.otherMessage.parts = [{ type: "text", text: "prior answer" }]
+    fixture.otherMessage.status = "completed"
+    const { ctx, deletes } = createMutationCtx(fixture.tables)
+
+    await stopGenerationRunForChat(ctx, fixture, { observedText: "visible prefix" })
+
+    expect(fixture.message).toMatchObject({
+      content: "visible prefix",
+      parts: [{ type: "text", text: "visible prefix" }],
+      status: "aborted",
+    })
+    expect(deletes).not.toContain(fixture.messageId)
+    expect(fixture.otherMessage.content).toBe("prior answer")
+  })
+
+  it.each([
+    "partial",
+    "different answer",
+    "partial answer" + "x".repeat(128 * 1024),
+  ])(
+    "ignores stale, divergent, or oversized observed text while still stopping",
+    async (observedText) => {
+      const fixture = makeStoppableFixture()
+      const { ctx } = createMutationCtx(fixture.tables)
+
+      await stopGenerationRunForChat(ctx, fixture, { observedText })
+
+      expect(fixture.message.content).toBe("partial answer")
+      expect(fixture.message.status).toBe("aborted")
+    }
+  )
+
+  it.each(["completed", "newer-run"] as const)(
+    "does not merge observed text after %s won",
+    async (winner) => {
+      const fixture = makeStoppableFixture()
+      if (winner === "completed") {
+        fixture.run.status = "completed"
+        fixture.message.status = "completed"
+      } else fixture.chat.statusRunId = fixture.otherRunId
+      const { ctx, patches } = createMutationCtx(fixture.tables)
+
+      await stopGenerationRunForChat(ctx, fixture, {
+        observedText: "partial answer extended",
+      })
+
+      expect(fixture.message.content).toBe("partial answer")
+      expect(patches).toEqual([])
+    }
+  )
+
   it("stops the exact run: user_stop, audit, content preserved, approvals denied, tools settled", async () => {
     vi.spyOn(Date, "now").mockReturnValue(NOW)
     const fixture = makeStoppableFixture()
@@ -5549,11 +5632,14 @@ describe("allowance settlement rides terminal transitions (ADR-0021)", () => {
       grantExpiresAt: Date.now() + 60_000,
     }
     fixture.chat.statusRunId = fixture.runId
+    fixture.tables.messages[0].content = "1."
+    fixture.tables.messages[0].parts = [{ type: "text", text: "1." }]
     const { ctx, tables } = createMutationCtx(fixture.tables)
 
     const result = await stopGenerationRunForChat(
       ctx,
-      await runOwner(ctx, fixture.runId)
+      await runOwner(ctx, fixture.runId),
+      { observedText: "1." + "x".repeat(164) }
     )
     expect(result.outcome).toBe("stopped")
     // Visible terminality + normal-authority revocation are immediate…
@@ -5568,7 +5654,9 @@ describe("allowance settlement rides terminal transitions (ADR-0021)", () => {
       status: "reserved",
       settlementGrantDigest: "grant-digest-1",
       providerMayHaveStarted: true,
+      terminalEstimatedOutputTokens: 1,
     })
+    expect(tables.messages[0].content).toHaveLength(166)
     expect(
       tables.usageReservations[0]!.settlementDeadlineAt
     ).toBeGreaterThan(Date.now())

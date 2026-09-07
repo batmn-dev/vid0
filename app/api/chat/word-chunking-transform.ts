@@ -36,6 +36,10 @@ const MEASURED_WORD_CHUNKING_TARGETS = [
     provider: "anthropic",
     model: "claude-haiku-4-5-20251001",
   },
+  {
+    provider: "google",
+    model: "gemini-3.5-flash",
+  },
 ] as const
 
 const wordSegmenter = new Intl.Segmenter(undefined, {
@@ -222,6 +226,14 @@ export function createWordChunkingTransform<TOOLS extends ToolSet>(
     }
 
     const appendText = (part: TextDeltaPart, arrivedAtMs: number) => {
+      // Metadata belongs to this delta, not an earlier held word's template.
+      if (part.providerMetadata !== undefined) {
+        flushPendingText()
+        if (part.text.length === 0) {
+          enqueue(part, arrivedAtMs)
+          return
+        }
+      }
       observeTextArrival(part.text.length, arrivedAtMs)
 
       if (pendingTextTemplate && pendingTextTemplate.id !== part.id) {

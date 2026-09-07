@@ -4,13 +4,12 @@
 //
 // The lazy highlighter SERVICE (lib/markdown/shiki-client.ts) is mocked at
 // the module seam so highlight CALL COUNTS and inputs are exact and module
-// loading can be deferred; timers and Date are fake, so idle behavior is
+// loading can be deferred; timers and Date are fake, so provider pauses are
 // a deterministic virtual-clock fact. Language normalization lives inside
 // the service (tested in lib/markdown/shiki-client.test.ts) — the component
 // passes the fenced language through verbatim.
 
 import { buildCodePayload } from "@/benchmarks/chat-performance/fixtures"
-import { GROWING_HIGHLIGHT_IDLE_MS } from "@/lib/chat-performance/streaming-code-render"
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import {
@@ -35,7 +34,12 @@ const shikiClientMock = vi.hoisted(() => {
     pending: [] as Array<() => void>,
   }
   const highlightCode = vi.fn(
-    (args: { code: string; language?: string; theme: string }) => {
+    (args: {
+      code: string
+      language?: string
+      theme: string
+      signal?: AbortSignal
+    }) => {
       const html = render(args.code, args.language, args.theme)
       if (state.defer) {
         return new Promise<string>((resolve) => {
@@ -133,22 +137,25 @@ describe("CodeBlockCode streaming rendering", () => {
   it("discards a stale async completion by generation token (deferred module load)", async () => {
     shikiClientMock.state.defer = true
 
-    const view = mount({ code: "const a = 1", language: "ts", growing: true })
-    await advance(GROWING_HIGHLIGHT_IDLE_MS)
+    const view = mount({ code: "const a = 1", language: "ts", growing: false })
+    await advance(0)
     expect(shikiClientMock.highlightCode).toHaveBeenCalledTimes(1)
+    const staleSignal = shikiClientMock.highlightCode.mock.calls[0][0].signal
+    expect(staleSignal?.aborted).toBe(false)
 
-    // Code A's idle highlight is in flight, blocked on module loading.
+    // Code A's highlight is in flight, blocked on module loading.
     view.rerender({
       code: "const a = 1\nconst b = 2",
       language: "ts",
-      growing: true,
+      growing: false,
     })
+    expect(staleSignal?.aborted).toBe(true)
     // The newer canonical tuple is immediately visible as plain escaped code;
     // the older highlighted tuple is never shown while B waits.
     expect(highlightedEl()).toBeNull()
     expect(plainText()).toBe("const a = 1\nconst b = 2")
 
-    await advance(GROWING_HIGHLIGHT_IDLE_MS)
+    await advance(0)
     expect(shikiClientMock.highlightCode).toHaveBeenCalledTimes(2)
     expect(shikiClientMock.highlightCode).toHaveBeenLastCalledWith(
       expect.objectContaining({ code: "const a = 1\nconst b = 2" })
@@ -163,9 +170,13 @@ describe("CodeBlockCode streaming rendering", () => {
       for (const resolve of pending) resolve()
     })
     expect(highlightedEl()?.textContent).toBe("const a = 1\nconst b = 2")
+    const currentSignal = shikiClientMock.highlightCode.mock.calls[1][0].signal
+    expect(currentSignal?.aborted).toBe(false)
+    view.unmount()
+    expect(currentSignal?.aborted).toBe(true)
   })
 
-  it("does not highlight continuously changing code and highlights once after idle", async () => {
+  it.each([50, 180, 250])("keeps code plain across %sms deltas and highlights once at settlement", async (intervalMs) => {
     const payload = buildCodePayload(400)
     const lines = payload.split("\n")
     const deltaCount = 40
@@ -180,26 +191,20 @@ describe("CodeBlockCode streaming rendering", () => {
       growing: true,
     })
     for (const state of growthStates.slice(1)) {
-      await advance(50)
+      await advance(intervalMs)
       view.rerender({ code: state, language: "typescript", growing: true })
       expect(shikiClientMock.highlightCode).not.toHaveBeenCalled()
       expect(plainText()).toBe(state)
     }
-    await advance(GROWING_HIGHLIGHT_IDLE_MS - 1)
+    await advance(2000)
     expect(shikiClientMock.highlightCode).not.toHaveBeenCalled()
-    await advance(1)
-
-    const growingCalls = shikiClientMock.highlightCode.mock.calls.length
-    expect(growingCalls).toBe(1)
-    expect(highlightedEl()?.textContent).toBe(payload)
+    expect(plainText()).toBe(payload)
 
     // Settle: exactly one final highlight of the full tuple; the rendered
     // text matches the complete payload byte-for-byte.
     view.rerender({ code: payload, language: "typescript", growing: false })
     await advance(10)
-    expect(shikiClientMock.highlightCode.mock.calls.length).toBe(
-      growingCalls + 1
-    )
+    expect(shikiClientMock.highlightCode).toHaveBeenCalledTimes(1)
     expect(highlightedEl()?.textContent).toBe(payload)
   })
 
@@ -207,11 +212,11 @@ describe("CodeBlockCode streaming rendering", () => {
     shikiClientMock.state.defer = true
     const hostile = "<script>alert(1)</script>"
 
-    mount({ code: hostile, language: "ts", growing: true })
+    mount({ code: hostile, language: "ts", growing: false })
     // The plain fallback shows React-escaped text, never a live element.
     expect(plainText()).toBe(hostile)
     expect(container?.querySelector("script")).toBeNull()
-    await advance(GROWING_HIGHLIGHT_IDLE_MS)
+    await advance(0)
 
     await act(async () => {
       const pending = [...shikiClientMock.state.pending]
@@ -293,39 +298,15 @@ describe("CodeBlockCode streaming rendering", () => {
     expect(highlightedEl()?.textContent).toBe("const f = 2")
   })
 
-  it("restarts the idle timer on every code change", async () => {
-    const view = mount({ code: "const a = 1", language: "ts", growing: true })
-    await advance(GROWING_HIGHLIGHT_IDLE_MS - 1)
-    expect(shikiClientMock.highlightCode).not.toHaveBeenCalled()
+  it("renders plain code when a highlighted block resumes growing", async () => {
+    const view = mount({ code: "const a = 1", language: "ts", growing: false })
+    await advance(0)
+    expect(highlightedEl()).not.toBeNull()
 
-    view.rerender({ code: "const b = 2", language: "ts", growing: true })
-    await advance(GROWING_HIGHLIGHT_IDLE_MS - 1)
-    expect(shikiClientMock.highlightCode).not.toHaveBeenCalled()
-    await advance(1)
-    expect(shikiClientMock.highlightCode).toHaveBeenCalledTimes(1)
-    expect(shikiClientMock.highlightCode).toHaveBeenCalledWith(
-      expect.objectContaining({ code: "const b = 2" })
-    )
-  })
-
-  it("unmount clears a pending idle highlight timer", async () => {
-    const view = mount({
-      code: "const gone = 1",
-      language: "ts",
-      growing: true,
-    })
-    await advance(10)
-    expect(shikiClientMock.highlightCode).not.toHaveBeenCalled()
-
-    // A delta restarts the idle timer…
-    view.rerender({
-      code: "const gone = 1\nconst more = 2",
-      language: "ts",
-      growing: true,
-    })
-    view.unmount()
-    // …which must be inert after unmount.
+    view.rerender({ code: "const a = 1", language: "ts", growing: true })
+    expect(highlightedEl()).toBeNull()
+    expect(plainText()).toBe("const a = 1")
     await advance(1000)
-    expect(shikiClientMock.highlightCode).not.toHaveBeenCalled()
+    expect(shikiClientMock.highlightCode).toHaveBeenCalledTimes(1)
   })
 })

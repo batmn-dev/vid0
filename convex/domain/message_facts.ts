@@ -1,3 +1,6 @@
+/** Optional Stop display prefix; larger answers retain the durable checkpoint. */
+export const MAX_STOP_OBSERVED_TEXT_CHARS = 128 * 1024
+
 export const DURABLE_MESSAGE_STATUSES = [
   "submitted",
   "streaming",
