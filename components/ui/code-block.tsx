@@ -5,7 +5,6 @@
  */
 "use client"
 
-import { GROWING_HIGHLIGHT_IDLE_MS } from "@/lib/chat-performance/streaming-code-render"
 import { highlightCode } from "@/lib/markdown/shiki-client"
 import {
   isChatPerfClientEnabled,
@@ -44,9 +43,8 @@ export type CodeBlockCodeProps = {
   /**
    * True only for the terminal code block of a live message, as classified in
    * `components/ui/markdown.tsx`. Growing blocks render changed code as
-   * escaped plain text immediately and highlight after
-   * `GROWING_HIGHLIGHT_IDLE_MS` without another tuple change; everything else
-   * highlights immediately.
+   * escaped plain text immediately. Highlight only when the block becomes
+   * non-terminal or the message settles.
    */
   growing?: boolean
 } & React.HTMLProps<HTMLDivElement>
@@ -69,16 +67,15 @@ function CodeBlockCode({
 
   // Stale async completions are invalidated by generation token in addition
   // to the exact tuple carried by `highlighted`; unmount and every input
-  // change clear pending timers.
+  // change cancel obsolete work waiting on shared module loads.
   const generationRef = useRef(0)
 
   useEffect(() => {
     const generation = ++generationRef.current
     let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | null = null
-
-    // Empty code renders through the plain path; nothing to highlight.
-    if (!code) return
+    // Provider pauses do not make an unfinished block stable.
+    if (!code || growing) return
+    const controller = new AbortController()
 
     const runHighlight = async () => {
       try {
@@ -89,7 +86,12 @@ function CodeBlockCode({
         const highlightStartedAt = isChatPerfClientEnabled()
           ? performance.now()
           : null
-        const html = await highlightCode({ code, language, theme })
+        const html = await highlightCode({
+          code,
+          language,
+          theme,
+          signal: controller.signal,
+        })
         if (highlightStartedAt !== null) {
           markChatPerf("shiki_highlight", {
             durationMs: performance.now() - highlightStartedAt,
@@ -103,19 +105,11 @@ function CodeBlockCode({
       }
     }
 
-    if (!growing) {
-      // Stable, settled, or become-non-terminal: highlight the final tuple.
-      void runHighlight()
-    } else {
-      // True inactivity boundary: every growing tuple change cancels and
-      // restarts this timer. There is no leading or periodic highlight while
-      // canonical code continues changing inside the window.
-      timer = setTimeout(() => void runHighlight(), GROWING_HIGHLIGHT_IDLE_MS)
-    }
+    void runHighlight()
 
     return () => {
       cancelled = true
-      if (timer !== null) clearTimeout(timer)
+      controller.abort()
     }
   }, [code, language, theme, growing])
 
@@ -128,9 +122,10 @@ function CodeBlockCode({
 
   // Render highlighted HTML only for the exact current tuple. A code,
   // language, or theme change therefore exposes the new canonical code
-  // immediately through the escaped plain fallback while any older async
-  // result or idle timer becomes obsolete.
+  // immediately through the escaped plain fallback while older async work
+  // becomes obsolete.
   const showHighlighted =
+    !growing &&
     highlighted !== null &&
     highlighted.code === code &&
     highlighted.language === language &&

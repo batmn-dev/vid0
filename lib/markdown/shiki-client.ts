@@ -181,29 +181,29 @@ function loadLanguage(
 
 /**
  * Highlight `code` with the resolved grammar and theme, loading whatever is
- * missing on demand. Rejects only when loading/highlighting genuinely fails
- * (network, engine); unknown languages take the `text` path instead. The
- * caller owns staleness: results must be dropped when the (code, language,
- * theme) generation has moved on.
+ * missing on demand. Unknown languages take the `text` path. Rejects on
+ * cancellation or loading/highlighting failure. Callers can abort obsolete
+ * work while shared resources load. The loads stay
+ * reusable; cancellation skips tokenization rather than cancelling shared work.
  */
 export async function highlightCode(args: {
   code: string
   language: string | undefined
   theme: ShikiClientTheme
+  signal?: AbortSignal
 }): Promise<string> {
+  args.signal?.throwIfAborted()
   const resolved = resolveShikiLanguage(args.language)
   const highlighter = await loadHighlighterCore()
+  args.signal?.throwIfAborted()
   if (resolved !== "text") {
     try {
       await loadLanguage(highlighter, resolved)
     } catch {
       // Grammar failed to load: degrade to plain text rather than throw.
-      return highlighter.codeToHtml(args.code, {
-        lang: "text",
-        theme: args.theme,
-      })
     }
   }
+  args.signal?.throwIfAborted()
   return highlighter.codeToHtml(args.code, {
     lang: resolved !== "text" && loadedLanguages.has(resolved) ? resolved : "text",
     theme: args.theme,

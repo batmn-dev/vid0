@@ -3,6 +3,10 @@ import { useChatEdit } from "@/app/components/chat/use-chat-edit"
 import { toast } from "@/components/ui/toast"
 import { api } from "@/convex/_generated/api"
 import type { Id } from "@/convex/_generated/dataModel"
+import {
+  extractTextFromMessageParts,
+  MAX_STOP_OBSERVED_TEXT_CHARS,
+} from "@/convex/domain/message_facts"
 import { isEmptyAssistantMessage } from "@/convex/domain/message_visibility"
 import { getOrCreateGuestUserId } from "@/lib/api"
 import { markApprovalResolvedLocally } from "@/lib/chat-runs/approval-auto-send-gate"
@@ -385,11 +389,27 @@ export function useChatCore({
   )
   const stopDurableRun = useCallback(
     async (runId: string) => {
+      // Read the canonical SDK snapshot; React may be one frame behind it.
+      const message =
+        selectedRun?.runId === runId
+          ? detachableStream.chat.messages.find(
+              (message) =>
+                message.role === "assistant" &&
+                message.id === selectedRun.assistantMessageId
+            )
+          : undefined
+      const observedText = message
+        ? extractTextFromMessageParts(message.parts)
+        : ""
       await stopGenerationRunMutation({
         runId: runId as Id<"generationRuns">,
+        ...(observedText.length > 0 &&
+        observedText.length <= MAX_STOP_OBSERVED_TEXT_CHARS
+          ? { observedText }
+          : {}),
       })
     },
-    [stopGenerationRunMutation]
+    [detachableStream.chat, selectedRun, stopGenerationRunMutation]
   )
   const generationPresentation = useGenerationPresentationController({
     chatId,

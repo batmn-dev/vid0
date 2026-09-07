@@ -219,8 +219,11 @@ export function useGenerationPresentationController({
 
     const targetRunId = presentation.stopTargetRunId
     if (targetRunId) {
-      await fireDurableStop(targetRunId)
+      // Capture the prefix before abort, then freeze delivery without waiting
+      // for the durable transaction's round trip.
+      const pendingStop = fireDurableStop(targetRunId)
       void stopLocal()
+      await pendingStop
       return
     }
 
@@ -285,12 +288,10 @@ export function useGenerationPresentationController({
         selectedRun.status !== "failed"
       ) {
         firedDeferredStopRef.current = commandKey
-        void fireDurableStop(selectedRun.runId).finally(() => {
-          // A submitted request is abortable only after the server projection
-          // proves which exact run owns it. A stream that already crossed the
-          // SDK's response-acceptance boundary was stopped at click time.
-          if (!deferredStop.localStopIssued) void stopLocal()
-        })
+        void fireDurableStop(selectedRun.runId)
+        // The exact run now proves the durable handoff. Capture happens above,
+        // and local delivery freezes before the mutation returns.
+        if (!deferredStop.localStopIssued) void stopLocal()
       }
     }
 

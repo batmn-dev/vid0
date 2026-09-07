@@ -1,6 +1,6 @@
 # 16. Streaming rendering: direct HTTP foreground, incremental projection, Convex durability
 
-- Status: accepted (2026-07-27), amended (2026-07-31)
+- Status: accepted (2026-07-27), amended (2026-07-31, 2026-09-07)
 - Date: 2026-07-27
 - Extended by ADR-0039: authenticated retained-stream replay feeds the same
   SDK rendering state after refresh. Saved text restores immediately; historical
@@ -38,7 +38,7 @@ Initiating visible tab
 Provider → direct HTTP stream → AI SDK local message state
          → incremental Markdown projection
          → stable memoized blocks + one bounded mutable region
-         → lazy/throttled syntax highlighting
+         → lazy syntax highlighting at stable block boundaries
 
 Durability and shared observation
 Provider stream → durable snapshot writer (750 ms) → Convex
@@ -88,10 +88,23 @@ explicit typed allowlist of fine-grained `@shikijs/langs` modules. Unknown
 languages render as escaped plain text. No-code conversations ship zero
 Shiki bytes. Growing code is always displayed immediately as escaped plain
 code. Every canonical code, language, or theme change invalidates highlighted
-HTML and restarts a 150 ms inactivity timer. Shiki may publish HTML only for
-the exact current tuple after that idle boundary; stable blocks and terminal
-settlement highlight immediately. Obsolete timers and async results are
-discarded.
+HTML. The terminal block of a streaming message stays plain until it becomes
+non-terminal or the message settles; stable blocks highlight immediately.
+Shiki may publish HTML only for the exact current tuple. Obsolete requests
+abort before tokenization after asynchronous core/grammar loading, without
+cancelling shared resource loads.
+
+**Stable-boundary highlighting (2026-09-07).** Replaces the 150 ms inactivity
+timer. A 40-update replay of a 12,243-character code block at 180/250 ms
+intervals triggered 40 complete highlights (251,001 input characters), compared
+with one final highlight at 50 ms intervals. Provider pauses repeatedly looked
+like completion to that timer. Reuse the existing block-stability classification
+instead of tuning another interval: unfinished terminal code remains readable
+but uncolored during pauses. A closed terminal fence also waits for a following
+block or settlement; no second fence parser or provider-specific rule is added.
+The shared service skips stale work while loading, and current plain text never
+waits for highlighting. Measurement limitations and validation are in the
+[shared streaming audit](../performance/2026-09-07-shared-streaming-audit.md).
 
 ### Notification cadence
 
@@ -128,7 +141,7 @@ which this client path faithfully paints as slabs. The implementation is
 `createWordChunkingTransform` (`app/api/chat/word-chunking-transform.ts`) at
 the server `streamText` seam — NOT the SDK's `smoothStream`, whose installed
 version also delays reasoning deltas and holds timers across aborts. Runtime
-eligibility is limited to that measured provider/model pair; every other
+eligibility is limited to measured provider/model pairs; every other
 provider/model retains its raw text-delta behavior until equivalent traces
 justify another entry. Once eligible, word-like segments are reconstructed
 across arbitrary provider delta boundaries using `Intl.Segmenter`, so both one
@@ -151,6 +164,29 @@ drops both the queued suffix and any partial word, and emits the abort
 terminal itself when the provider has already filled AI SDK's upstream queue.
 That explicit terminal prevents a stopped mid-drain response from closing as
 a successful completion.
+
+Provider metadata is also a boundary: flush a held partial word before a new
+metadata-bearing text delta. Preserve empty metadata events unchanged and in
+order, without feeding them into the text-arrival estimate. This retains
+Google's text-part thought signatures, including metadata sent without text.
+
+**Shared responsiveness review (2026-09-07).** Provider burst size alone does
+not justify expanding pacing. First separate provider arrival, server release,
+browser receipt, and visible-content delay; measure first output, completion,
+interaction responsiveness, and Stop under representative delivery shapes.
+Preserve the shared canonical stream and frame-aligned client. Smoothing remains
+an explicit latency/readability tradeoff, including the existing Haiku exception.
+The experimental Gemini allowlist addition was withdrawn pending that evidence.
+The completed audit removed repeated code highlighting, verified code/Stop/reload
+in authenticated Chrome, and confirmed that raw Gemini prose remained coarse.
+Two paired direct-Google/OpenRouter calls showed similarly large incoming chunks
+on both routes, with OpenRouter slower in these samples. The measured direct
+Google `gemini-3.5-flash` route therefore now uses the **existing** canonical
+transform, with no new algorithm or Gemini-specific timing constants. This is
+an explicit bounded latency/readability tradeoff supported by our measurements,
+not a claim about Theo's private implementation. Other unmeasured routes retain
+raw delivery. See the [shared streaming audit](../performance/2026-09-07-shared-streaming-audit.md)
+and [Gemini experiment](../performance/2026-09-07-gemini-streaming.md).
 
 ### Growing single-block shapes (amendment, 2026-07-28)
 

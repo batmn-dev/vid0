@@ -35,7 +35,10 @@ async function run(parts: Part[]) {
   return outputs
 }
 
-const textDelta = (text: string, id = "t1"): Part => ({
+const textDelta = (
+  text: string,
+  id = "t1"
+): Extract<Part, { type: "text-delta" }> => ({
   type: "text-delta",
   id,
   text,
@@ -51,13 +54,23 @@ describe("splitIntoWordChunks", () => {
 })
 
 describe("isWordChunkingEligible", () => {
-  it("enables only the provider/model pair measured through this app", () => {
+  it("enables only the provider/model pairs measured through this app", () => {
     expect(
       isWordChunkingEligible({
         provider: "anthropic",
         model: "claude-haiku-4-5-20251001",
       })
     ).toBe(true)
+
+    expect(
+      isWordChunkingEligible({ provider: "google", model: "gemini-3.5-flash" })
+    ).toBe(true)
+    expect(
+      isWordChunkingEligible({ provider: "google", model: "gemini-3.1-pro-preview" })
+    ).toBe(false)
+    expect(
+      isWordChunkingEligible({ provider: "openrouter", model: "gemini-3.5-flash" })
+    ).toBe(false)
 
     expect(
       isWordChunkingEligible({
@@ -95,6 +108,36 @@ describe("createWordChunkingTransform", () => {
       "Hello ",
       "world.",
     ])
+  })
+
+  it("preserves empty metadata deltas between held text and terminal parts", async () => {
+    const signature: Part = {
+      ...textDelta(""),
+      providerMetadata: { google: { thoughtSignature: "test-signature" } },
+    }
+    const end: Part = { type: "text-end", id: "t1" }
+    const parts = [textDelta("Hello"), signature, end]
+    const outputs = await run(parts)
+
+    expect(outputs.map(({ part }) => part)).toEqual(parts)
+    expect(outputs[1].part).toBe(signature)
+  })
+
+  it("preserves incoming metadata when its text completes a held word", async () => {
+    const signature: Part = {
+      ...textDelta("lo "),
+      providerMetadata: { google: { thoughtSignature: "test-signature" } },
+    }
+    const end: Part = { type: "text-end", id: "t1" }
+    const parts = [textDelta("Hel"), signature, textDelta("world."), end]
+    const outputs = await run(parts)
+
+    expect(outputs.map(({ part }) => part)).toEqual(parts)
+    expect(
+      outputs
+        .flatMap(({ part }) => part.type === "text-delta" ? [part.text] : [])
+        .join("")
+    ).toBe("Hello world.")
   })
 
   it("flushes an unfinished word within the partial-word holdback budget", async () => {

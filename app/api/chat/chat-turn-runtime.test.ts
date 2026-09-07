@@ -1194,18 +1194,52 @@ describe("createChatTurnRuntime — generated titles", () => {
 describe("createChatTurnRuntime — evidence-gated word chunking", () => {
   it.each([
     {
+      provider: "anthropic",
       model: "claude-haiku-4-5-20251001",
+      source: "byok",
       expectedTransform: true,
     },
     {
+      provider: "anthropic",
       model: "claude-sonnet-5",
+      source: "byok",
       expectedTransform: false,
     },
-  ])(
-    "sets smoothing to $expectedTransform for Anthropic $model",
-    async ({ model, expectedTransform }) => {
+    {
+      provider: "google",
+      model: "gemini-3.5-flash",
+      source: "byok",
+      expectedTransform: true,
+    },
+    {
+      provider: "google",
+      model: "gemini-3.5-flash",
+      source: "platform",
+      expectedTransform: true,
+    },
+    {
+      provider: "google",
+      model: "gemini-3.1-pro-preview",
+      source: "byok",
+      expectedTransform: false,
+    },
+    {
+      provider: "openrouter",
+      model: "gemini-3.5-flash",
+      source: "byok",
+      expectedTransform: false,
+    },
+    {
+      provider: "openai",
+      model: "gpt-5-mini",
+      source: "byok",
+      expectedTransform: false,
+    },
+  ] as const)(
+    "sets smoothing to $expectedTransform for $provider $model via $source",
+    async ({ provider, model, source, expectedTransform }) => {
       vi.mocked(getAllModels).mockResolvedValue([
-        { id: model, provider: "anthropic", tools: false },
+        { id: model, provider, tools: false },
       ] as unknown as Awaited<ReturnType<typeof getAllModels>>)
       const harness = makeStreamHarness()
       const runtime = createChatTurnRuntime({
@@ -1217,6 +1251,15 @@ describe("createChatTurnRuntime — evidence-gated word chunking", () => {
           anonymousId: "anonymous-user",
           isAuthenticated: false,
           convexToken: undefined,
+          credential: { provider, apiKey: "test-key", source },
+          route: {
+            modelId: model,
+            routeId: model,
+            providerId: provider,
+            upstreamModelId: model,
+            credentialSource: source,
+            routeReason: source === "byok" ? "priority_byok" : "platform",
+          },
         }),
         deps: makeDeps(harness, makeFetchMutation()),
       })

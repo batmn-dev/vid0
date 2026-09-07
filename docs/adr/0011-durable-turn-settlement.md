@@ -133,6 +133,35 @@ window — Convex entirely unreachable for the whole settlement tail while
 the stream delivered fine — is accepted and observable
 (`durable_settlement_degraded`).
 
+### September 7 amendment: preserve the visible prefix on owned Stop
+
+An early Gemini Stop reproduced 166 visible characters shrinking to the last
+2-character checkpoint, including after reload. Stop revokes the execution grant
+before a later throttled snapshot can land. More frequent checkpoints would
+reduce, but not close, this race.
+
+The existing owner-authorized Stop mutation now accepts an optional text prefix
+captured from the canonical SDK message before the client aborts its local
+reader. In the same transaction, it preserves that prefix only when it strictly
+extends the stored text for the current, nonterminal run. This is a narrow
+exception to server-originated content preservation, not a client recovery store.
+The Convex subscription remains the durable read authority.
+
+The client omits text over 128 Ki characters; the server independently enforces
+that limit and a 768 KiB projected message bound. Invalid, divergent, stale, or
+oversized text is ignored without preventing Stop. Existing tool parts and
+provider metadata remain server-owned. Lifecycle accounting runs against the
+original worker checkpoint before the optional display extension is applied;
+client text cannot alter usage evidence. Ownership, current-run checks,
+first-terminal-wins, and execution-grant revocation remain intact.
+
+A two-phase cancellation protocol with a dedicated worker flush receipt could
+retain wholly server-originated content, but introduces another cancellation
+state and authority path. The bounded extension on the existing owned mutation
+closes the observed race with less machinery. It preserves the stopping tab's
+captured prefix; it cannot preserve an unseen prefix from a different tab that
+loses a terminal race, or bypass the explicit size bounds.
+
 ## Supersessions of ADR-0009 (exactly three)
 
 1. **Captured-token worker writes** ("the convex token crosses here, once"):

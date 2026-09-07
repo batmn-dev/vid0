@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { resetSharedChatStreamOwnersForTests } from "./use-detachable-chat-stream"
+import { MAX_STOP_OBSERVED_TEXT_CHARS } from "@/convex/domain/message_facts"
 import { CHAT_TURN_EXECUTION_BUDGET } from "@/lib/chat-turn/execution-budget"
 import { takeChatPerfHeader } from "@/lib/observability/chat-performance-client"
 import type { UIMessage } from "@ai-sdk/react"
@@ -1203,6 +1204,78 @@ describe("useChatCore deferred durable Stop (projection gap)", () => {
       runId: "run_accepted",
     })
     expect(chatCoreMocks.stop).toHaveBeenCalledTimes(1)
+  })
+
+  it("captures the newest SDK text before freezing locally without waiting for durable Stop", async () => {
+    chatCoreMocks.useChatState.status = "streaming"
+    chatCoreMocks.useChatState.messages = [
+      { id: "msg_live", role: "assistant", parts: [{ type: "text", text: "1." }] },
+    ]
+    chatCoreMocks.selectedRun = {
+      runId: "run_live",
+      assistantMessageId: "msg_live",
+      status: "streaming",
+      pendingApproval: null,
+    }
+    mount()
+    const binding = chatCoreMocks.chatInstances.at(-1)
+    if (!binding) throw new Error("Missing SDK binding")
+    binding.messages.push({
+      id: "msg_live",
+      role: "assistant",
+      parts: [{ type: "text", text: "1. The already visible response." }],
+    })
+    let resolveStop: (() => void) | undefined
+    chatCoreMocks.convexMutation.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveStop = resolve
+      })
+    )
+    chatCoreMocks.stop.mockImplementationOnce(() => {
+      binding.messages.length = 0
+    })
+
+    let pendingStop: Promise<void> | undefined
+    act(() => {
+      pendingStop = coreRef.current?.stop()
+    })
+
+    expect(chatCoreMocks.convexMutation).toHaveBeenCalledWith({
+      runId: "run_live",
+      observedText: "1. The already visible response.",
+    })
+    expect(chatCoreMocks.stop).toHaveBeenCalled()
+    await act(async () => {
+      resolveStop?.()
+      await pendingStop
+    })
+  })
+
+  it("still stops when SDK text exceeds the optional prefix payload limit", async () => {
+    chatCoreMocks.useChatState.status = "streaming"
+    chatCoreMocks.selectedRun = {
+      runId: "run_live",
+      assistantMessageId: "msg_live",
+      status: "streaming",
+      pendingApproval: null,
+    }
+    mount()
+    const binding = chatCoreMocks.chatInstances.at(-1)
+    if (!binding) throw new Error("Missing SDK binding")
+    binding.messages.push({
+      id: "msg_live",
+      role: "assistant",
+      parts: [{ type: "text", text: "x".repeat(MAX_STOP_OBSERVED_TEXT_CHARS + 1) }],
+    })
+
+    await act(async () => {
+      await coreRef.current?.stop()
+    })
+
+    expect(chatCoreMocks.convexMutation).toHaveBeenCalledExactlyOnceWith({
+      runId: "run_live",
+    })
+    expect(chatCoreMocks.stop).toHaveBeenCalled()
   })
 
   it("disarms without firing when the arriving projection is already terminal", async () => {

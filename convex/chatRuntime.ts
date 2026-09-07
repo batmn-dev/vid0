@@ -51,6 +51,7 @@ import {
   shouldSampleChatPerfConvex,
 } from "./domain/chat_perf"
 import { extractTextFromMessageParts } from "./domain/message_parts"
+import { MAX_STOP_OBSERVED_TEXT_CHARS } from "./domain/message_facts"
 import {
   hasSemanticAssistantParts,
   isTerminalOutcomeStub,
@@ -2916,9 +2917,56 @@ export type StopGenerationRunResult = {
   terminalReason?: Doc<"generationRuns">["terminalReason"]
 }
 
+function observedStopTextPatch(
+  message: Doc<"messages">,
+  observedText: string | undefined
+): { content: string; parts: unknown[] } | null {
+  if (
+    observedText === undefined ||
+    observedText.length > MAX_STOP_OBSERVED_TEXT_CHARS ||
+    observedText.length <= message.content.length ||
+    !observedText.startsWith(message.content)
+  ) {
+    return null
+  }
+
+  const storedParts: unknown = message.parts
+  if (!Array.isArray(storedParts)) return null
+  const parts: unknown[] = [...storedParts]
+  const partsText = extractTextFromMessageParts(parts)
+  if (partsText !== message.content) return null
+
+  const suffix = observedText.slice(partsText.length)
+  const lastPart = parts.at(-1)
+  if (
+    lastPart &&
+    typeof lastPart === "object" &&
+    "type" in lastPart &&
+    lastPart.type === "text" &&
+    "text" in lastPart &&
+    typeof lastPart.text === "string"
+  ) {
+    parts[parts.length - 1] = { ...lastPart, text: lastPart.text + suffix }
+  } else {
+    parts.push({ type: "text", text: suffix })
+  }
+
+  // Keep Stop usable even when the optional display prefix exceeds doc limits.
+  try {
+    const size = new TextEncoder().encode(
+      JSON.stringify({ ...message, content: observedText, parts })
+    ).byteLength
+    if (size > 768 * 1024) return null
+  } catch {
+    return null
+  }
+  return { content: observedText, parts }
+}
+
 export async function stopGenerationRunForChat(
   ctx: MutationCtx,
-  owner: AuthenticatedRunOwner
+  owner: AuthenticatedRunOwner,
+  options: { observedText?: string } = {}
 ): Promise<StopGenerationRunResult> {
   // Structural run ownership (CONTEXT.md "Authenticated handler"): the caller
   // resolves the chat THROUGH the run (`ownedGenerationRunMutation` /
@@ -2950,8 +2998,21 @@ export async function stopGenerationRunForChat(
   const now = nowMs()
   const reason = "stopped by user"
   const resolved = await gatherAssistantMessageFacts(ctx, run, undefined)
+  const observedPatch = resolved
+    ? observedStopTextPatch(resolved.message, options.observedText)
+    : null
   const verdict = resolveGenerationRunTransition(
-    { runStatus: run.status, message: resolved?.facts ?? null },
+    {
+      runStatus: run.status,
+      message: resolved
+        ? {
+            ...resolved.facts,
+            ...(observedPatch
+              ? { hasSemanticParts: true, hasSnapshotForRun: true }
+              : {}),
+          }
+        : null,
+    },
     { kind: "stop", reason }
   )
   if (verdict.kind !== "transition") {
@@ -3001,6 +3062,16 @@ export async function stopGenerationRunForChat(
     })
   }
 
+  // Accounting above sees only worker evidence. This owned Stop may retain a
+  // newer display prefix, without accepting client tools, metadata, or usage.
+  if (observedPatch && resolved) {
+    const stoppedMessage = await ctx.db.get(resolved.message._id)
+    const patch = stoppedMessage
+      ? observedStopTextPatch(stoppedMessage, options.observedText)
+      : null
+    if (patch) await ctx.db.patch(resolved.message._id, patch)
+  }
+
   console.log(
     JSON.stringify({
       _tag: "run_stop_won",
@@ -3014,13 +3085,13 @@ export async function stopGenerationRunForChat(
 }
 
 export const stopGenerationRun = ownedGenerationRunMutation({
-  args: {},
-  handler: async (ctx) =>
-    stopGenerationRunForChat(ctx, {
-      user: ctx.user,
-      chat: ctx.chat,
-      run: ctx.run,
-    }),
+  args: { observedText: v.optional(v.string()) },
+  handler: async (ctx, args) =>
+    stopGenerationRunForChat(
+      ctx,
+      { user: ctx.user, chat: ctx.chat, run: ctx.run },
+      args
+    ),
 })
 
 /**
