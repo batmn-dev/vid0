@@ -114,6 +114,7 @@
     "@tailwindcss/postcss": "^4.3.2",
     "@tailwindcss/typography": "^0.5.20",
     "@types/jsdom": "^28.0.3",
+    "@types/mdast": "^4.0.4",
     "@types/node": "^22",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

@@ -493,6 +493,31 @@ describe("MessageUser edits", () => {
     expect(container?.querySelector("textarea")).toBeNull()
   })
 
+  it.each(["metaKey", "ctrlKey"])(
+    "saves with %s+Enter without inserting a paragraph",
+    async (modifier) => {
+      const onEdit = vi.fn(async () => ({ ok: true }) as const)
+      renderEditableMessage({ onEdit, children: "**Original** text\n" })
+      openEditor()
+      await act(async () => {
+        container
+          ?.querySelector('[contenteditable="true"]')
+          ?.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              bubbles: true,
+              cancelable: true,
+              key: "Enter",
+              [modifier]: true,
+            })
+          )
+      })
+      expect(onEdit).toHaveBeenCalledWith(
+        "msg-client-123",
+        "**Original** text\n"
+      )
+    }
+  )
+
   it("hides the edit control on a non-durable chat", () => {
     renderEditableMessage({ onEdit: vi.fn(), isDurableChat: false })
 

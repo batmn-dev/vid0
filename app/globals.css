@@ -2489,7 +2489,8 @@ code {
 .composer-format-menu-item:focus-visible {
   background: var(--composer-format-hover);
 }
-.composer-format-button:focus-visible {
+.composer-format-button:focus-visible,
+.composer-format-link-input:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
@@ -2568,6 +2569,9 @@ code {
   outline: none;
   font-size: 14px;
   line-height: 20px;
+}
+.composer-format-link-input:focus-visible {
+  border-radius: 8px;
 }
 .composer-format-link-input[aria-invalid="true"] {
   outline: 1px solid var(--destructive);

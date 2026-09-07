@@ -824,6 +824,47 @@ describe("composer formatting input rules", () => {
     }
   })
 
+  it("clears the selected link when two links share a destination", async () => {
+    const { EditorView } = await import("prosemirror-view")
+    const { EditorState, TextSelection } = await import("prosemirror-state")
+    const {
+      createPromptInputPlugins,
+      createPromptInputDocument,
+      promptInputSchema,
+    } = await import("./prompt-input-editor")
+    const mount = document.createElement("div")
+    document.body.append(mount)
+    const view = new EditorView(mount, {
+      state: EditorState.create({
+        doc: createPromptInputDocument(
+          "[First](https://example.com) [Second](https://example.com)"
+        ),
+        plugins: createPromptInputPlugins(() => ""),
+      }),
+    })
+    try {
+      view.focus()
+      view.dispatch(
+        view.state.tr.setSelection(TextSelection.create(view.state.doc, 2))
+      )
+      view.dispatch(
+        view.state.tr.setSelection(TextSelection.create(view.state.doc, 8))
+      )
+      document
+        .querySelector<HTMLButtonElement>('[aria-label="Clear link"]')
+        ?.click()
+      expect(
+        view.state.doc.rangeHasMark(1, 6, promptInputSchema.marks.link)
+      ).toBe(true)
+      expect(
+        view.state.doc.rangeHasMark(7, 13, promptInputSchema.marks.link)
+      ).toBe(false)
+    } finally {
+      view.destroy()
+      mount.remove()
+    }
+  })
+
   it("turns typed prefixes and emphasis into rich nodes and restores syntax on undo", async () => {
     const { EditorView } = await import("prosemirror-view")
     const { EditorState, TextSelection } = await import("prosemirror-state")

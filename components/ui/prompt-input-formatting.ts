@@ -573,7 +573,7 @@ function createFormattingToolbar(view: EditorView) {
       return
     }
     if (mode !== "link") mode = link ? "preview" : "format"
-    const key = `${currentBlockStyle(view.state)}:${mode}:${activeMark(view.state, "strong")}:${activeMark(view.state, "em")}:${link?.href ?? ""}`
+    const key = `${currentBlockStyle(view.state)}:${mode}:${activeMark(view.state, "strong")}:${activeMark(view.state, "em")}:${link ? `${link.from}-${link.to}-${link.href}` : ""}`
     toolbar.hidden = false
     if (key !== rendered) {
       closeMenu()
