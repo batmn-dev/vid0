@@ -88,7 +88,8 @@ export function parseDeterministicPerfDirective(
     .filter((part) => part.type === "text" && typeof part.text === "string")
     .map((part) => part.text)
     .join("\n")
-  const match = DIRECTIVE_PATTERN.exec(text)
+  // The rich composer serializes literal brackets with Markdown escapes.
+  const match = DIRECTIVE_PATTERN.exec(text.replace(/\\(\[|\])/g, "$1"))
   if (!match) return null
   const scenario = match[1] as DeterministicPerfScenario
   if (!DETERMINISTIC_PERF_SCENARIOS.includes(scenario)) return null

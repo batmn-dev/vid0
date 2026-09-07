@@ -1,0 +1,43 @@
+{
+  "url": "https://www.not-a-wrapper.com/c/5109f091-19f0-4cbc-88ff-cede0d213f10",
+  "comparison": "Captured assistant DOM textContent strings; startsWith for prefixes and === for final equality",
+  "final": {
+    "at": 1788708180574,
+    "sourceCharacters": 28560,
+    "renderedCharacters": 27706,
+    "reloadedAt": 1788708190194,
+    "exactRenderedTextEquality": true
+  },
+  "reloads": [
+    {
+      "beforeAt": 1788708081151,
+      "beforeSourceCharacters": 4363,
+      "beforeRenderedCharacters": 4275,
+      "firstNonemptySampleAt": 1788708087662,
+      "samplingGap": true,
+      "nonemptySamples": 8,
+      "allSampledNonemptyPreservePrefix": true,
+      "allSampledNonemptyShowStop": true,
+      "liveSourceCharacters": [6632, 6637, 6637, 6640, 6648, 6655, 6660, 6674],
+      "liveRenderedCharacters": [6502, 6507, 6507, 6508, 6516, 6523, 6528, 6542],
+      "liveSampleTimestamps": [1788708087662, 1788708087680, 1788708087694, 1788708087712, 1788708087738, 1788708087772, 1788708087792, 1788708087810]
+    },
+    {
+      "beforeAt": 1788708095792,
+      "beforeSourceCharacters": 9549,
+      "beforeRenderedCharacters": 9337,
+      "firstNonemptySampleAt": 1788708097253,
+      "firstNonemptySourceCharacters": 9723,
+      "firstNonemptyRenderedCharacters": 9505,
+      "firstNonemptyPreservesPrefix": true,
+      "samplingGap": false,
+      "emptyHydrationSamples": 16,
+      "nonemptySamples": 21,
+      "allSampledNonemptyPreservePrefix": true,
+      "allSampledNonemptyShowStop": true,
+      "liveSourceCharacters": [12347, 12360, 12360, 12363, 12369, 12375, 12376, 12376, 12379, 12379, 12379, 12379, 12380, 12380, 12388, 12388, 12408, 12424, 12424, 12426],
+      "liveRenderedCharacters": [12039, 12052, 12052, 12055, 12061, 12067, 12067, 12067, 12071, 12071, 12071, 12071, 12072, 12072, 12080, 12080, 12100, 12116, 12116, 12118],
+      "liveSampleTimestamps": [1788708104152, 1788708104174, 1788708104189, 1788708104210, 1788708104225, 1788708104243, 1788708104258, 1788708104270, 1788708104290, 1788708104303, 1788708104317, 1788708104330, 1788708104348, 1788708104361, 1788708104377, 1788708104389, 1788708104409, 1788708104426, 1788708104439, 1788708104461]
+    }
+  ]
+}

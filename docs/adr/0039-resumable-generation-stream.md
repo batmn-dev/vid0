@@ -1,6 +1,6 @@
 # 39. Reconnect to an execution's retained UI stream
 
-- Status: implemented; no-rewind restoration verified locally
+- Status: implemented; no-rewind restoration verified in production
 - Date: 2026-09-05
 - Supersedes: ADR-0008's exclusion of stream resumption
 - Preserves: ADR-0011 settlement, ADR-0013 navigation ownership, ADR-0016 immediate rendering
@@ -80,7 +80,11 @@ Redis continued receiving chunks and the authenticated retained route returned
 `[text]`; comparing part indexes rejected every replay publication. Local browser
 evidence therefore did not establish production acceptance. Production-shaped
 SDK frames reproduce this failure and cover the corrected adoption rule above.
-Production acceptance still requires a fresh live reload test after this fix.
+The [fresh production acceptance](../performance/2026-09-06-stream-restoration-acceptance.md)
+on corrected deployment `5ed93b1f` passed: two live reloads preserved the sampled
+prefix and resumed granular updates before completion. The completed rendered
+answer matched exactly after another reload. A focused SDK receiver test covers
+same-document transport interruption and prefix-preserving retry separately.
 
 ## References
 

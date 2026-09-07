@@ -232,7 +232,8 @@ function normalizeComposerEntityStructure(
     | { kind: "insert"; pos: number; node: ProseMirrorNode }
   > = []
 
-  newState.doc.forEach((paragraph, paragraphOffset) => {
+  newState.doc.descendants((paragraph, paragraphOffset) => {
+    if (!paragraph.isTextblock) return true
     paragraph.forEach((node, childOffset, index) => {
       const pos = paragraphOffset + 1 + childOffset
       if (node.type === promptInputSchema.nodes.composerEntityCursorTarget) {
@@ -266,6 +267,7 @@ function normalizeComposerEntityStructure(
         })
       }
     })
+    return false
   })
 
   if (operations.length === 0) return null

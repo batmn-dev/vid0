@@ -35,15 +35,10 @@ source provenance. Make compaction idempotent, observable, and visible to the
 user; fall back to an explicit hard stop when safe compaction cannot fit. Cover
 authenticated and guest chats, model switches, attachments, and multi-step
 tool turns with cross-provider tests and token/compaction telemetry.
-- **Durable long-running generations:** design and implement provider execution
-outside the lifetime of the initiating HTTP request so deep research and long
-reasoning turns are not stopped by Vercel's function-duration ceiling. Preserve
-live Convex snapshots, user Stop and supersession behavior, authorization,
-concurrency ownership, usage and allowance settlement, recovery, and terminal
-state correctness. Replace the total provider deadline and its settlement
-reserve/watchdog coupling with durable worker ownership and, if needed, a true
-stream-inactivity safeguard. Review the architecture against current ADRs and
-open-source reference chat apps, then document the final decision in an ADR.
+- **Durable long-running generations:** Move provider execution beyond the
+initiating HTTP request's lifetime. Preserve Convex ownership, live snapshots,
+Stop, supersession, recovery, and usage settlement. Document the execution and
+cancellation model in an ADR.
 - **Project-scoped agent context:** let each project define shared instructions,
 knowledge and files, tool or connector permissions, and optional durable
 memory that are automatically available to every chat in that project, similar
@@ -55,29 +50,21 @@ do not leak context across project boundaries.
 - **Assistant Response UI Widgets:** Image Carousels, Image Previews, Weather, Stock UI, Charts (maybe), editable markdown (maybe)
 - **Monetization:** Setup Usage-based monthly pricing using Stripe or better option
 - **Agent-first file library:** Create a computer-like environment where agents can easily discover files?
-- **Evaluate Next.js to TanStack migration:** From [Theo's post](https://x.com/theo/status/1997406196660400228?lang=en)
 - **Evaluate inference on Fluid:** From [Theo's post](https://x.com/theo/status/1997784385337372877)
-- **Retained-stream admission:** Before multi-user rollout, bound concurrent
-replay readers per user across instances and measure Redis command/connection
-usage. Reuse existing admission patterns; preserve refresh and multi-tab recovery.
-- **Evaluate Vercel's BotID:** Consider narrowly scoped bot attestation before
-expensive platform-funded generations.
+- **Retained-stream admission:** Bound concurrent replay readers per user across
+instances using existing admission patterns. Measure Redis usage and preserve
+refresh and multi-tab recovery.
+- **Evaluate Vercel's BotID:** Assess bot attestation for platform-funded
+turn admission, including compatibility with guest access and existing limits.
 - **Connectors:** Integrations with Google, YouTube, Figma, and personal tools
 - **Agentic design system (future):** Define an agent-readable, customizable
 visual system after the product's core interaction patterns stabilize.
-- **Thread code splitting:** Shared lazy Markdown and Composer intent warming
-are implemented. Attribute and defer charts/composer extras, audit client Zod,
-and split remaining thread-only code. Verify cold `/` JS bytes, request count,
-`input_to_next_paint`, and separate `send_to_first_visible_text` and
-`first_text_to_visible` stages in the browser. Target: ≥250 KB Brotli reduction
-from the 2026-08-31 baseline, no first-text regression or new first-send long task.
-Existing script-size evidence is not browser validation; see
-`docs/performance/2026-09-05-interaction-optimizations.md`.
-- **Warm chat navigation:** Bounded query caching, hover/click warming, and
-`SUITE=thread-switch` shipped (ADR-0031). Reach one-frame revisited navigation
-and evaluate thread-list persistence across reloads. Verify visited/unvisited
-p50/p95 paint times, subscriptions per switch, and memory after 50 switches;
-keep unvisited navigation no slower and memory bounded.
+- **Thread code splitting:** Measure and defer remaining charts and Composer
+extras; audit client Zod imports. Verify reduced cold-load JavaScript without
+regressing typing, first-send latency, or first-text rendering in the browser.
+- **Warm chat navigation:** Improve revisited-thread paint latency using the
+existing cache and warming paths (ADR-0031). Measure visited/unvisited p50/p95
+and verify bounded subscriptions and memory after 50 switches.
 - **Investigate visibility-gated chat hydration (replicate T3 Chat):** observed
 on 2026-09-02 while benchmarking against t3.chat: their chat client does not
 finish hydrating while `document.visibilityState` is `hidden`. The composer
@@ -122,12 +109,10 @@ short ADR-0026 amendment recording the rule and the label source of truth.
 
 ## Dependency watch
 
-- **AI SDK stable approval-persistence hook:** retain the Durable turn runtime's
-`experimental_transform` while it is the only released pre-callback,
-backpressure-preserving seam for persisting approval requests before forwarding
-them. Exit when a stable released API preserves ordering, abort propagation,
-multi-step behavior, and approval-settle -> snapshot-flush -> terminal-write
-ordering without moving durable ownership out of ADR-0009.
+- **AI SDK stable approval-persistence hook:** Evaluate a stable replacement for
+`experimental_transform`. Require approval persistence before forwarding,
+backpressure, abort propagation, multi-step support, and settlement ordering;
+preserve ADR-0009 ownership.
 - **Research and implement Anthropic** `pause_turn` **continuation:** check the
   latest AI SDK and Anthropic provider behavior against Anthropic's replay
   contract, and measure production incidence by model and search configuration.
@@ -138,13 +123,9 @@ ordering without moving durable ownership out of ADR-0009.
   fixed-thinking search workaround only for Claude 4.6 models that still accept
   `budget_tokens`; never apply it to adaptive-only models. Remove
   `searchThinkingDowngrade` after the continuation path is proven.
-- **Signed tool approvals:** defer `experimental_toolApprovalSecret` until the
-coherent AI SDK patch line preserves signatures end to end and the deployment
-has a shared-secret, unsigned-pending-approval, and rotation strategy. Reassess
-adoption when the API is stable or the application begins trusting
-noncanonical client history. Do not introduce application-owned signing while
-Convex remains the canonical authenticated approval authority without a
-demonstrated threat gap.
+- **Signed tool approvals:** Assess whether SDK signatures close a concrete gap
+in Convex-authoritative approvals. Validate end-to-end signature preservation,
+pending unsigned approvals, and shared-secret rotation before adoption.
 
 
 
@@ -157,61 +138,13 @@ bounded live-state lifecycle, reduced-motion fallback, and measured profiling
 before assigning severity or changing established behavior; prefer a
 compositor-friendly equivalent when it preserves the same interaction and
 visual result.
-- **Routine compatible dependency refresh:** update the remaining compatible
-patch and minor releases, including React, Sentry, Braintrust, PostHog,
-WorkOS, TanStack Query, Shiki, Base UI, React Hook Form, Tailwind, Vitest, and
-Prettier. Update the declared package manager from `bun@1.3.1` to
-`bun@1.3.14`, refresh safe transitive dependencies such as `undici`, rerun the
-dependency audit, and validate with the normal project checks.
-- **Staged major dependency upgrades:** evaluate TypeScript 6 before TypeScript
-7 and wait for compatible compiler-API tooling; keep `@types/node` aligned
-with the supported runtime; defer jsdom 30 until the Node engine floor is
-compatible; and handle ESLint 10, Motion 13, and Recharts 3.10 as separate,
-focused upgrades with migration-specific lint, animation, and visual checks.
+- **Routine compatible dependency refresh:** Update compatible direct and
+transitive dependencies and the declared Bun version. Audit the lockfile and
+run the normal project checks.
+- **Staged major dependency upgrades:** Evaluate TypeScript, ESLint, jsdom,
+Motion, and Recharts separately. Verify runtime and tooling compatibility;
+validate each upgrade with focused checks.
 - **Assistant responsiveness:** Rendering optimizations shipped; end-to-end
 responsiveness remains open. Measure TTFT with chat-performance spans, quantify
 the platform-funded title-usage wait before settlement, and verify streaming
 smoothness in the browser.
-- **Burst responses after ~10 s (benchmark finding 1):** in the 2026-09-02
-comparison (`docs/performance/2026-09-02-ttft-tps-vs-t3-chat.md`) five of 27
-production turns on Claude Haiku 4.5 and GLM-5.3 arrived as one burst: SDK
-time-to-first-output of 10.1–13.4 s followed by an output window under 260 ms
-and 7–13 SSE chunks, which also inflates the Generation stats rate to
-300–4,272 tok/s. T3 Chat's GLM never showed it. Investigate whether a ~10 s
-timeout or fallback sits in the provider, OpenRouter routing, the AI gateway,
-or our own request options (retries, `abortSignal`, provider fallback), and
-whether Anthropic thinking and OpenRouter reasoning share a cause.
-*Measure first:* query the Run timing receipt (ADR-0030) on production runs
-for `providerFirstOutputMs > 8000` joined with `modelResponseMs −
-providerFirstOutputMs < 500`, bucketed by route, provider, and reasoning
-setting, to get the real incidence and confirm it is provider-side (receipt
-segments) rather than pacing (which sits after the SDK clock). Add a
-`bench:browser` recipe that reproduces the burst shape with a deterministic
-delayed-stream script so the detection is testable offline.
-*Verify a fix:* the incidence query drops to zero over at least 50 production
-turns per affected route, the deterministic reproduction streams normally, and
-the stats line rejects sub-second windows on multi-hundred-token replies
-(rate hidden or flagged, never 4,000 tok/s). Land only with the before/after
-query results attached to the PR.
-- **0.5–2.3 s before the stream headers (benchmark finding 3):** between the
-client's `/api/chat` request leaving and the `start` chunk arriving we spend
-0.5–2.3 s on 26 of 27 runs (Luna P1 runs: 2.2, 2.3, 0.8 s; the one excluded
-GLM P3 burst run took 2.7 s), plus a serial `/api/rate-limits`
-round trip and 0.3–0.7 s of client work before the request even leaves. T3
-Chat spends its overhead before the request instead (~0.9 s) and then returns
-headers in 0.0–0.9 s. This segment is ours under ADR-0030 (the receipt's
-`prepareMs`: HTTP receipt → provider dispatch, plus whatever Vercel adds
-before the handler runs) and is the entire Luna P1 gap. Attribute it across auth,
-admission proof, allowance reservation, Convex `createWithFirstTurn`, model
-resolution, and any awaited title or telemetry work, and check whether the
-rate-limit call can be folded into the turn request. *Measure first:* pull
-`prepareMs` (and `firstWriteDelayMs`, to confirm the post-first-output side
-is not the culprit) from the receipt for the last week by route and cold/warm
-function instance, and add a browser-side span from click to headers to the
-`bench:browser` harness so both halves are gated.
-*Verify a fix:* p50 `prepareMs` on warm instances under 400 ms and
-p95 under 1 s in the weekly benchmark gate table, the rate-limit round trip
-gone from the pre-request waterfall, and a same-day A/B rerun of Luna P1
-against main showing the send→first-text-chunk median at or below T3's
-(2.97 s in this session, from the single T3 Luna P1 run timed at the chunk)
-before merging.

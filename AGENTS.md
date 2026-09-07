@@ -47,7 +47,6 @@ I want to share some of my preferences here so we can be more aligned when worki
 
 - Verify with `bun run typecheck`, `bun run lint`, `bun run test`, and `bun run build:next`.
 - `bun run build` **is NOT a build — it deploys to production Convex.** Never run it to verify a change; use `bun run build:next`.
-- My long-running `bun dev` owns port 3000. Verify through it and never kill or restart it, and don't start a competing dev server.
 
 
 

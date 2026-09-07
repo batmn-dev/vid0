@@ -196,6 +196,91 @@ it("reconnects by GET without erasing visible text or dispatching another genera
   expect(fetchMock).toHaveBeenCalledTimes(1)
 })
 
+it("preserves live output across an interrupted retained reader and catches up before publishing again", async () => {
+  const sources: ReadableStreamDefaultController<Uint8Array>[] = []
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(source) {
+            sources.push(source)
+          },
+        })
+      )
+  )
+  vi.stubGlobal("fetch", fetchMock)
+  const sendMessages = vi.fn()
+  const onFinish = vi.fn()
+  const chat = new ResumableChat({
+    transport: { sendMessages, reconnectToStream: vi.fn() },
+    onFinish,
+  })
+  const text = () =>
+    chat.messages[0]?.parts
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("")
+  const published: string[] = []
+  chat["~registerMessagesCallback"](() => published.push(text() ?? ""))
+  const history = (
+    source: ReadableStreamDefaultController<Uint8Array>,
+    highWater: string
+  ) => {
+    source.enqueue(frame({ type: "base", highWater }))
+    chunks.forEach((chunk, i) =>
+      source.enqueue(frame({ type: "chunk", id: `${i + 1}-0`, chunk }))
+    )
+  }
+  const delta = (
+    source: ReadableStreamDefaultController<Uint8Array>,
+    id: string,
+    value: string
+  ) =>
+    source.enqueue(
+      frame({
+        type: "chunk",
+        id,
+        chunk: { type: "text-delta", id: "new-text", delta: value },
+      })
+    )
+  chat.syncRun(
+    {
+      chatId: "chat",
+      runId: "run",
+      assistantMessageId: "assistant",
+      status: "streaming",
+    },
+    []
+  )
+  try {
+    await vi.waitFor(() => expect(sources).toHaveLength(1))
+    history(sources[0], "3-0")
+    sources[0].enqueue(frame({ type: "caught-up" }))
+    delta(sources[0], "4-0", " world")
+    await vi.waitFor(() => expect(text()).toBe("Hello world"))
+    published.length = 0
+    sources[0].close() // EOF without an end frame forces the same-document retry.
+    await vi.waitFor(() => expect(sources).toHaveLength(2))
+    history(sources[1], "4-0")
+    await vi.waitFor(() => expect(sources[1].desiredSize).toBe(1))
+    expect(text()).toBe("Hello world")
+    delta(sources[1], "4-0", " world")
+    sources[1].enqueue(frame({ type: "caught-up" }))
+    await vi.waitFor(() => expect(chat.status).toBe("streaming"))
+    expect(text()).toBe("Hello world")
+    delta(sources[1], "5-0", " again")
+    await vi.waitFor(() => expect(text()).toBe("Hello world again"))
+    expect(chat.status).toBe("streaming")
+    expect(published.every((value) => value.startsWith("Hello world"))).toBe(
+      true
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(sendMessages).not.toHaveBeenCalled()
+    expect(onFinish).not.toHaveBeenCalled()
+  } finally {
+    chat.detachObserver()
+  }
+})
+
 it("keeps checkpoints available during a missing replay and releases a detached reader", async () => {
   const fetchMock = vi.fn(async () => new Response(null, { status: 503 }))
   vi.stubGlobal("fetch", fetchMock)
