@@ -59,6 +59,27 @@ beside the contenteditable. The app clones the visible editing DOM at the derive
 multiline expansion, so hidden link destinations and Markdown delimiters
 cannot change the measured text width.
 
+The multiline layout and full-height expand control have separate thresholds.
+An explicit newline exposes the control immediately; otherwise the rendered
+draft must exceed four body lines at the multiline width without the button
+gutter. This fixed measurement width prevents the button's own padding from
+changing its visibility. Shrinking below that threshold exits full-height mode.
+Multiline layout stays latched until the draft is empty. The surface and its
+editor/control slots use the same `${isExpanded}-${isExpandedComposer}` layout
+dependency, matching the published reference bundle. Draft edits within a mode
+do not restart projection. The reference spring uses `bounce: 0.1` and
+`duration: 0.3`; paste suppresses layout motion for 250ms on every route.
+The controls anchor is a plain zero-height grid row. The editor stays mounted,
+and reduced-motion preferences disable layout motion. The measurement clone
+stays under the editor's parent to retain scoped wrapping and typography.
+Expand/Collapse keeps `aria-pressed` for accessibility without selected styling;
+only an open menu or an actual pointer press receives the shared pressed fill.
+
+Verified against authenticated ChatGPT on 2026-09-08 and its published
+[`PromptTextareaComposer` bundle](https://chatgpt.com/cdn/assets/8b34dbc2-mx35vjavisrk7hwp.js)
+(`hvn`, `ovn`). The compact-width measurement remains a local adapter; the
+reference uses editor resize signals for the same mode and visibility rules.
+
 ## Alternatives considered
 
 - Keep the native textarea. Rejected because it cannot preserve a stable editor

@@ -159,7 +159,14 @@ describe("PromptInput responsive expansion", () => {
           return 42
         scrollHeightReads += 1
         const width = Number.parseFloat(this.style.width) || 555
-        return (this.textContent?.length ?? 0) * 8 > width ? 68 : 42
+        return (
+          Math.max(
+            1,
+            Math.ceil(((this.textContent?.length ?? 0) * 8) / width)
+          ) *
+            26 +
+          16
+        )
       }
     )
 
@@ -175,7 +182,7 @@ describe("PromptInput responsive expansion", () => {
     vi.unstubAllGlobals()
   })
 
-  it("remeasures a static draft when available inline width changes", () => {
+  it("expands when available width shrinks and stays expanded when it grows", () => {
     const value = "a".repeat(65)
 
     act(() => {
@@ -205,7 +212,7 @@ describe("PromptInput responsive expansion", () => {
 
     trailingWidth = 148
     act(() => observer?.trigger())
-    expect(form?.hasAttribute("data-expanded")).toBe(false)
+    expect(form?.hasAttribute("data-expanded")).toBe(true)
 
     surfaceWidth = 650
     act(() => observer?.trigger())
@@ -213,7 +220,7 @@ describe("PromptInput responsive expansion", () => {
 
     surfaceWidth = 768
     act(() => observer?.trigger())
-    expect(form?.hasAttribute("data-expanded")).toBe(false)
+    expect(form?.hasAttribute("data-expanded")).toBe(true)
   })
 
   it("measures the visible link label rather than its destination", () => {
@@ -258,6 +265,10 @@ describe("PromptInput responsive expansion", () => {
       true
     )
     render(link)
+    expect(container.querySelector("form")?.hasAttribute("data-expanded")).toBe(
+      true
+    )
+    render("")
     expect(container.querySelector("form")?.hasAttribute("data-expanded")).toBe(
       false
     )
@@ -607,6 +618,54 @@ describe("PromptInput responsive expansion", () => {
     expect(onKeyDown).not.toHaveBeenCalled()
     expect(editor.getAttribute("aria-disabled")).toBeNull()
     expect(editor.getAttribute("aria-readonly")).toBeNull()
+  })
+
+  it("shows Expand at five wrapped lines and remeasures on deletion or resize", () => {
+    const render = (length: number) =>
+      act(() => {
+        root.render(
+          <PromptInput value={"x".repeat(length)} onValueChange={() => {}}>
+            <PromptInputTextarea aria-label="Ask anything" />
+          </PromptInput>
+        )
+      })
+    render(360)
+    const form = container.querySelector("form")!
+    expect(form.hasAttribute("data-expanded")).toBe(true)
+    expect(form.hasAttribute("data-expanded-composer-mode-button")).toBe(false)
+    render(367)
+    expect(form.hasAttribute("data-expanded-composer-mode-button")).toBe(true)
+    const editor = container.querySelector(".composer-prosemirror")
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Expand"]')!
+        .click()
+    )
+    expect(form.hasAttribute("data-expanded-composer")).toBe(true)
+    expect(container.querySelector(".composer-prosemirror")).toBe(editor)
+    render(360)
+    expect(form.hasAttribute("data-expanded-composer-mode-button")).toBe(false)
+    expect(form.hasAttribute("data-expanded-composer")).toBe(false)
+    surfaceWidth = 640
+    act(() => resizeObservers.at(-1)?.trigger())
+    expect(form.hasAttribute("data-expanded-composer-mode-button")).toBe(true)
+    surfaceWidth = 768
+    act(() => resizeObservers.at(-1)?.trigger())
+    expect(form.hasAttribute("data-expanded-composer-mode-button")).toBe(false)
+  })
+
+  it("does not show Expand just because attachments force the multiline layout", () => {
+    act(() =>
+      root.render(
+        <PromptInput expanded value="short" onValueChange={() => {}}>
+          <PromptInputTextarea aria-label="Ask anything" />
+        </PromptInput>
+      )
+    )
+    expect(container.querySelector("form")?.hasAttribute("data-expanded")).toBe(
+      true
+    )
+    expect(container.querySelector('button[aria-label="Expand"]')).toBeNull()
   })
 
   it("uses an accessible expand control and root-owned scroll lock", () => {

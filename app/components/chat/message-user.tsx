@@ -24,7 +24,15 @@ import { createPromptInputDocument } from "@/components/ui/prompt-input-schema"
 import type { MessageBranchInfo } from "@/lib/chat-messages/branch"
 import type { EditTurnResult } from "@/lib/chat-turn/chat-turn-controller"
 import { cn } from "@/lib/utils"
-import { RiCheckLine, RiFileLine, RiFileTextLine } from "@remixicon/react"
+import {
+  RiArrowDownSLine,
+  RiCheckLine,
+  RiEditLine,
+  RiFileCopyLine,
+  RiFileLine,
+  RiFileTextLine,
+  RiShare2Line,
+} from "@remixicon/react"
 import Image from "next/image"
 import type { Node as ProseMirrorNode } from "prosemirror-model"
 import React, { useCallback, useId, useMemo, useRef, useState } from "react"
@@ -124,79 +132,6 @@ function MessageAttachmentView({
         <MorphingDialogClose className="text-primary" />
       </MorphingDialogContainer>
     </MorphingDialog>
-  )
-}
-
-function CopyUserMessageIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
-      focusable="false"
-      aria-hidden="true"
-      fill="currentColor"
-    >
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M15.1006 1.78516C16.793 1.78556 18.165 3.15808 18.165 4.85059V10.8838C18.1649 12.5762 16.7929 13.9478 15.1006 13.9482H13.998V15.0508C13.9976 16.7431 12.626 18.1151 10.9336 18.1152H4.90039C3.20789 18.1152 1.83537 16.7432 1.83496 15.0508V9.01758C1.83496 7.32482 3.20764 5.95215 4.90039 5.95215H6.00195V4.85059C6.00195 3.15783 7.37463 1.78516 9.06738 1.78516H15.1006ZM4.90039 7.28223C3.94218 7.28223 3.16504 8.05936 3.16504 9.01758V15.0508C3.16544 16.0087 3.94243 16.7852 4.90039 16.7852H10.9336C11.8914 16.785 12.6676 16.0086 12.668 15.0508V9.01758C12.668 8.05945 11.8917 7.28237 10.9336 7.28223H4.90039ZM9.06738 3.11523C8.10917 3.11523 7.33203 3.89237 7.33203 4.85059V5.95215H10.9336C12.6262 5.95229 13.998 7.32491 13.998 9.01758V12.6182H15.1006C16.0584 12.6178 16.8348 11.8416 16.835 10.8838V4.85059C16.835 3.89262 16.0585 3.11564 15.1006 3.11523H9.06738Z"
-      />
-    </svg>
-  )
-}
-
-function EditUserMessageIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
-      focusable="false"
-      aria-hidden="true"
-      fill="currentColor"
-    >
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M11.6258 3.30375C13.0516 1.88123 15.3202 1.91012 16.6805 3.29496C18.0834 4.64996 18.1292 6.92825 16.6893 8.36821L9.68929 15.3682L9.68832 15.3672C8.9762 16.1131 8.0665 16.6184 7.11605 16.8389L7.11507 16.8399L3.24789 17.7276L3.24691 17.7256C3.08016 17.7653 2.74207 17.799 2.4725 17.5303C2.20162 17.2601 2.23613 16.9199 2.27621 16.753H2.27425L3.1639 12.8956C3.38813 11.8986 3.89924 11.028 4.6014 10.3272L11.6258 3.30375ZM5.54183 11.2686C5.00143 11.8078 4.62462 12.4592 4.46078 13.1905L4.4598 13.1944L3.7557 16.2461L6.81722 15.543C7.52306 15.3789 8.20539 15.0001 8.73617 14.4405L14.3944 8.78129L11.2118 5.5977L5.54183 11.2686ZM15.742 4.23637C14.9045 3.37296 13.4757 3.3368 12.5653 4.24516L12.1522 4.65727L15.3348 7.84086L15.7489 7.42778C16.6655 6.51112 16.6228 5.08792 15.7577 4.252L15.742 4.23637Z"
-      />
-    </svg>
-  )
-}
-
-function SharePromptIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
-      focusable="false"
-      aria-hidden="true"
-      fill="currentColor"
-    >
-      <path d="M16.6663 10.1681C17.0335 10.1681 17.3313 10.4659 17.3313 10.8332V14.1994C17.3313 15.929 15.929 17.3312 14.1995 17.3312H5.80005C4.07048 17.3312 2.66821 15.929 2.66821 14.1994V10.8332C2.66821 10.4659 2.96598 10.1681 3.33325 10.1681C3.70052 10.1681 3.99829 10.4659 3.99829 10.8332V14.1994C3.99829 15.1944 4.80502 16.0011 5.80005 16.0011H14.1995C15.1945 16.0011 16.0012 15.1944 16.0012 14.1994V10.8332C16.0012 10.466 16.2991 10.1683 16.6663 10.1681Z" />
-      <path d="M9.31763 3.08317C9.71412 2.76014 10.2865 2.75993 10.6829 3.08317L10.7649 3.15739L14.012 6.40446C14.2716 6.66406 14.2714 7.08517 14.012 7.34489C13.7523 7.60459 13.3312 7.60459 13.0715 7.34489L10.6653 4.93864V11.8752C10.6653 12.2423 10.3674 12.54 10.0002 12.5402C9.63297 12.5402 9.33521 12.2424 9.33521 11.8752V4.93669L6.92896 7.34489C6.66926 7.60459 6.24725 7.60459 5.98755 7.34489C5.72836 7.08521 5.72817 6.66402 5.98755 6.40446L9.23462 3.15739L9.31763 3.08317Z" />
-    </svg>
-  )
-}
-
-function CollapsibleUserMessageChevron() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      aria-hidden="true"
-      className="size-4"
-      fill="currentColor"
-    >
-      <path d="M12.629 5.879a.525.525 0 1 1 .742.742l-4.765 4.765a.86.86 0 0 1-1.212 0L2.629 6.62a.525.525 0 1 1 .742-.742L8 10.508z" />
-    </svg>
   )
 }
 
@@ -386,7 +321,7 @@ function CollapsibleUserMessage({ children }: { children: string }) {
               isExpanded && "rotate-180"
             )}
           >
-            <CollapsibleUserMessageChevron />
+            <Icon icon={RiArrowDownSLine} slotSize={16} />
           </div>
         </button>
       )}
@@ -681,7 +616,7 @@ export function MessageUser({
               copied ? (
                 <Icon icon={RiCheckLine} slotSize={20} />
               ) : (
-                <CopyUserMessageIcon />
+                <Icon icon={RiFileCopyLine} slotSize={20} />
               )
             }
           />
@@ -689,7 +624,7 @@ export function MessageUser({
             <MessageActionButton
               label="Share prompt"
               onClick={sharePrompt}
-              icon={<SharePromptIcon />}
+              icon={<Icon icon={RiShare2Line} slotSize={20} />}
               testId="share-prompt-link-turn-action-button"
             />
           ) : null}
@@ -697,7 +632,7 @@ export function MessageUser({
             <MessageActionButton
               label="Edit message"
               onClick={handleEditStart}
-              icon={<EditUserMessageIcon />}
+              icon={<Icon icon={RiEditLine} slotSize={20} />}
             />
           )}
           {/* Branch nav reveals with the footer actions to match the captured
