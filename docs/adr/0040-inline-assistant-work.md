@@ -1,0 +1,35 @@
+# ADR-0040: Inline assistant work before the final answer
+
+Date: 2026-09-08
+Status: Accepted
+
+## Context
+
+The current ChatGPT reference renders commentary and search progress in chronological order inside the assistant response. At the final-answer boundary it collapses prior work into an inline disclosure. Our panel-only activity presentation and concatenated text body cannot reproduce this behavior. The installed OpenAI Responses adapter exposes `commentary` and `final_answer` text phase metadata; other providers supply ordered text, reasoning, and tool parts with less explicit semantics.
+
+## Decision
+
+Extend the existing turn-evidence and assistant-turn projection with immutable inline-work facts. Interpret provider phase at the evidence boundary. Keep the full original message text for persistence, provider history, and existing copy/share semantics, while rendering commentary separately from answer text. For unphased providers, use observed tool/step boundaries conservatively and never infer commentary from ordinary source citations or invent reasoning summaries.
+
+Render work inline while active. Collapse it when final answer text begins, with a manually expandable history containing nested tool/source disclosures. Preserve the existing activity panel for source navigation and approval/tool detail affordances. Shared semantic tokens, normalized tool statuses, and one message projection remain authoritative.
+
+Use the installed Motion package for finite active-status transitions and the existing collapsible primitive for manual history disclosure. At the first nonempty final-answer text, replace live work with its summary in the same render. Empty final-phase placeholders freeze semantic timing but retain the visible Thinking state. Do not add a reveal-drain queue or a second outgoing work tree. The earlier interpretation of `Gn` as a universal 300ms answer-onset collapse was incorrect: its animation is enabled for disclosure and conditional work-summary branches, not the ordinary live-history replacement observed here.
+
+OpenAI raw reasoning summaries and progress commentary are different channels. Read the resolved provider from existing message metadata at stream start. Keep OpenAI reasoning in the canonical message and Activity panel; only commentary becomes inline prose. This avoids flashing a raw summary before the first preamble. Other providers retain supplied reasoning as a fallback, including omission of leading provider headings from inline prose. Never fabricate progress text. For default-prompt OpenAI tool turns, ask the model for concise pre-tool progress and updates when findings change the next step; custom system prompts remain authoritative. The existing Responses adapter already preserves commentary/final_answer phase.
+
+ChatGPT's downloaded CoTV5 renderer (`kn`, `On`) uses content-keyed preamble snapshots and height clipping. Its CoT Markdown wrapper explicitly disables inner streaming color decay and does not enable the separate streaming-mask plugin. Match that paint behavior while retaining one incremental Markdown tree per item (ADR-0016): capture committed paint before a text update into a private inert, aria-hidden snapshot host, retain it for 300ms after exit activation, and fade the incoming canonical paint over 700ms. Interrupted snapshots continue their original fade, as measured in the live DOM; forcing an outgoing snapshot opaque causes flashes. Enter and exit activation wait two animation frames. Until activation, freeze the current clip height; a pre-activation interruption becomes opaque because no fade started. Height transitions take 300ms, with 260ms initial entry delay and zero delay on interrupted growth. Replay/history/reduced motion bypass animation; reentry remeasures its baseline and unmount cancels all paint work. Incoming text is never queued or sliced.
+
+The active status keeps one row identity. Its content replaces over 150ms exit and 300ms enter after 150ms delay. Search counts have their own numeric slot. Native status wording comes from server-authored structured summaries rather than tool-completion grammar; preserve our normalized tool truth instead of pretending a completed SDK search is still running. Height uses CSS transitions and measured-height writes so browser interruption behavior matches the source, rather than canceling and restarting WAAPI height animations. Source evidence and timestamped comparison reviews are in `output/thinking-ui-parity-20260908/exact-lifecycle/`; source assets are in `video2-audit/`. Actual provider wording, chunk delivery and tool sequences are not controlled by the renderer and are not evidence of exact ChatGPT model behavior.
+
+Retain ordered phase-bearing live snapshots so reconnects preserve the same anatomy. Save optional pre-answer `workSummaryDurationMs` separately from total generation `workDurationMs`; the latter keeps its existing accounting contract. Preserve snapshot throttling, versioned dirtiness, and terminal content-survival ordering. Optional fields keep existing production records compatible.
+
+## Alternatives
+
+- Restyle the existing panel trigger: insufficient because the response structure and interaction destination differ.
+- Derive a second UI timeline directly from raw SDK parts in React: duplicates lifecycle and provider knowledge.
+- Freeze elapsed time only on the client: loses the boundary on reload.
+- Redefine total work duration: would change established generation accounting.
+
+## Verification
+
+Use SDK-shaped fixtures through the production renderer for explicit phases, multiple tool steps, source-only updates, unphased providers, opaque reasoning, stop/error, nested disclosure reset, and keyboard controls. Test snapshot chronology and timer persistence independently. Compare the supplied full video, live authenticated reference DOM/CSS, and local lifecycle evidence; capture gaps and provider variability remain explicit limitations of visual claims.

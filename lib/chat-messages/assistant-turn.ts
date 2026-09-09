@@ -19,31 +19,74 @@
  *    pass per render, not one per consumer.
  *  - All metadata reads go through the Message metadata module's readers
  *    (ADR-0002) — never `metadata as Record<string, unknown>`.
- *  - `assistantTurnViewsEqual` is the render-gate: it compares only the facts
- *    the message ROW renders (tool signature, reasoning phase, metadata
- *    identity, server id) — deliberately NOT `reasoning.text` or `sources`,
- *    so streaming reasoning/source deltas do not churn the row body (the
- *    activity panel owns that state; the trigger's source count settles on
- *    the status flip). Message text is compared by the row's `children` prop.
+ *  - `assistantTurnViewsEqual` snapshots all inline facts, including source,
+ *    reasoning and provider phase deltas. Canonical text remains available to
+ *    copy/share and provider history while inlineContent separates commentary.
  */
 import type { UIMessage } from "ai"
-import { isToolEvidencePart, type ToolEvidenceUIPart } from "./turn-evidence"
 import type { DurableMessageStatus } from "./durable-contract"
 import {
   getReasoningDurationMs,
   getServerMessageId,
   getWorkDurationMs,
+  getWorkSummaryDurationMs,
 } from "./metadata"
 import { extractTextFromMessageParts, getToolRenderSignature } from "./parts"
 import type { AssistantSourceResult } from "./sources"
 import {
   deriveTurnEvidence,
+  isToolEvidencePart,
+  type TextEvidence,
   type ToolCallEvidence,
+  type ToolEvidenceUIPart,
   type TurnEvidence,
 } from "./turn-evidence"
+import type { SearchImageResult } from "./turn-evidence"
 
 export type { SearchImageResult } from "./turn-evidence"
-import type { SearchImageResult } from "./turn-evidence"
+
+export type AssistantInlineContent = {
+  answerText: string
+  hasFinalAnswer: boolean
+  commentary: ReadonlyArray<TextEvidence>
+}
+
+/**
+ * Raw tool input is already covered by toolRenderSignature, so it is dropped
+ * before serializing. A shallow map keeps JSON.stringify on its native fast
+ * path; a replacer callback costs a call per property on every render.
+ */
+function inlineRenderSignatureFor(evidence: TurnEvidence): string {
+  return JSON.stringify({
+    ...evidence,
+    timeline: evidence.timeline.map((item) =>
+      item.kind === "tool" ? { ...item, input: undefined } : item
+    ),
+  })
+}
+
+function deriveInlineContent(evidence: TurnEvidence): AssistantInlineContent {
+  const commentary: TextEvidence[] = []
+  let answerText = ""
+  let hasFinalAnswer = false
+  const lastToolOffset = evidence.timeline.findLastIndex(
+    (item) => item.kind === "tool"
+  )
+  for (const block of evidence.textBlocks) {
+    // A later tool is concrete evidence of an intermediate unphased response.
+    // Uncertain text remains answer content; explicit provider phase always wins.
+    const isCommentary =
+      block.phase === "commentary" ||
+      (block.phase === undefined && block.activityOffset <= lastToolOffset)
+    if (isCommentary) commentary.push(block)
+    else {
+      answerText += block.text
+      hasFinalAnswer ||=
+        block.phase === "final_answer" || block.text.trim().length > 0
+    }
+  }
+  return { answerText, hasFinalAnswer, commentary }
+}
 
 type ChatStatus = "streaming" | "ready" | "submitted" | "error"
 
@@ -92,6 +135,9 @@ export type AssistantTurnView = {
    * presentation — see CONTEXT.md "Turn evidence").
    */
   evidence: TurnEvidence
+  inlineContent: AssistantInlineContent
+  /** Immutable snapshot of the inline facts, including in-place SDK updates. */
+  inlineRenderSignature: string
   /** Ordered text content across all text parts. */
   text: string
   /**
@@ -108,6 +154,7 @@ export type AssistantTurnView = {
   reasoning: ReasoningView
   /** Server-persisted provider-stream lifecycle duration. */
   persistedWorkDurationMs: number | undefined
+  persistedWorkSummaryDurationMs?: number
   /** Durable identity, read via the metadata module. */
   serverMessageId: string | undefined
   /**
@@ -212,6 +259,8 @@ export function deriveAssistantTurnView(
   return {
     orderedParts: parts ?? [],
     evidence,
+    inlineContent: deriveInlineContent(evidence),
+    inlineRenderSignature: inlineRenderSignatureFor(evidence),
     text: extractTextFromMessageParts(parts),
     toolParts,
     toolRenderSignature: getToolRenderSignature(parts),
@@ -219,6 +268,7 @@ export function deriveAssistantTurnView(
     searchImageResults: [...evidence.searchImageResults],
     reasoning: deriveReasoningView(parts, status, message.metadata),
     persistedWorkDurationMs: getWorkDurationMs(message.metadata),
+    persistedWorkSummaryDurationMs: getWorkSummaryDurationMs(message.metadata),
     serverMessageId: getServerMessageId(message.metadata),
     metadata: message.metadata,
   }
@@ -227,8 +277,8 @@ export function deriveAssistantTurnView(
 /**
  * True when any of the turn's visible thread content survived: text, tool
  * cards, or image results. The aborted/failed banners' "Partial response
- * preserved." claim must hold only when this is true — reasoning alone lives
- * in the Activity panel and is not preserved response content, so a stop that
+ * preserved." claim must hold only when this is true — reasoning alone is
+ * work history rather than response content, so a stop that
  * lands mid-thinking reads as a bare "Generation stopped."
  */
 export function hasPreservedResponseContent(view: AssistantTurnView): boolean {
@@ -254,25 +304,7 @@ export function hasRenderableEvidence(view: AssistantTurnView): boolean {
   )
 }
 
-/**
- * The row's render gate. Views are fresh objects every render (in-place part
- * mutation forbids reference memoization), so equality is content-based over
- * exactly the facts the message row renders:
- *  - `toolRenderSignature` — inline tool cards + image results (tool outputs)
- *  - `reasoning.phase` — the activity trigger's thinking/thought state
- *  - `metadata` identity — durable status, persisted duration, tool display
- *    metadata (the metadata writers preserve reference on no-op)
- *  - `serverMessageId` — the trigger's panel-turn identity
- * Deliberately excluded: `text` (compared via the row's `children` prop) and
- * `reasoning.text` / `sources` — reasoning and source deltas are panel-owned
- * and must not churn the streaming row body. The row's
- * sources presentations (the trigger's source count, the footer sources
- * badge) render from `sources` but ONLY on settled turns, and every path into
- * settled re-renders the row through compared fields — the client status
- * flip, an isLast handoff, or the durable snapshot's metadata identity change
- * — so excluding `sources` can neither churn a live row nor swallow the
- * settle that reveals them.
- */
+/** Fresh immutable signatures catch in-place SDK mutations in inline work. */
 export function assistantTurnViewsEqual(
   a: AssistantTurnView | undefined,
   b: AssistantTurnView | undefined
@@ -281,6 +313,7 @@ export function assistantTurnViewsEqual(
   if (!a || !b) return false
   return (
     a.toolRenderSignature === b.toolRenderSignature &&
+    a.inlineRenderSignature === b.inlineRenderSignature &&
     a.reasoning.phase === b.reasoning.phase &&
     a.metadata === b.metadata &&
     a.serverMessageId === b.serverMessageId
@@ -366,9 +399,13 @@ export function deriveAssistantTurnPhase(
   if (inFlightCalls.length > 0) {
     return {
       kind: "tooling",
-      toolNames: Array.from(new Set(inFlightCalls.map((call) => call.toolName))),
+      toolNames: Array.from(
+        new Set(inFlightCalls.map((call) => call.toolName))
+      ),
     }
   }
+
+  if (view.inlineContent.hasFinalAnswer) return { kind: "responding" }
 
   if (view.reasoning.phase === "thinking") {
     return {
@@ -377,15 +414,7 @@ export function deriveAssistantTurnPhase(
     }
   }
 
-  // Substance = anything of this turn already on screen (text, tool cards,
-  // image results) or invisible-but-real activity (opaque reasoning that
-  // finished). A bare stream remains in the universal Thinking phase.
-  const hasSubstance =
-    view.text.trim().length > 0 ||
-    view.toolParts.length > 0 ||
-    view.searchImageResults.length > 0 ||
-    view.reasoning.phase !== "idle"
-  return hasSubstance
-    ? { kind: "responding" }
-    : { kind: "thinking", visibility: "opaque" }
+  // A completed tool or summary can precede more work in the same stream.
+  // Only answer evidence above establishes the responding boundary.
+  return { kind: "thinking", visibility: "opaque" }
 }

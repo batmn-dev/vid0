@@ -9,9 +9,8 @@ import {
 } from "@/components/ui/tooltip"
 import type { SearchMode } from "@/lib/models/types"
 import { cn } from "@/lib/utils"
-import { RiCloseLine, RiGlobalOffLine } from "@remixicon/react"
+import { RiCloseLine, RiGlobalLine, RiGlobalOffLine } from "@remixicon/react"
 import { useState } from "react"
-import { ComposerGlobeIcon } from "./composer-menu-icons"
 
 type WebSearchControlProps = {
   enabled: boolean
@@ -113,12 +112,11 @@ function WebSearchControl({
                 showDisableIcon
                   ? RiCloseLine
                   : active
-                    ? ComposerGlobeIcon
+                    ? RiGlobalLine
                     : RiGlobalOffLine
               }
               slotSize={20}
               glyphSize={showDisableIcon ? 16 : undefined}
-              glyphInset={showDisableIcon ? undefined : 0}
             />
             <span className="max-w-40 truncate max-[520px]:sr-only">
               Search

@@ -4659,6 +4659,30 @@ describe("stopGenerationRun", () => {
 })
 
 describe("updateAssistantSnapshotForChat", () => {
+  it("keeps the observed summary duration through abort without changing total work", async () => {
+    const fixture = createGenerationRunLinkageFixture()
+    const { ctx } = createMutationCtx(fixture.tables)
+    const owner = await runOwner(ctx, fixture.runId)
+    await updateAssistantSnapshotForChat(ctx, owner, {
+      messageId: fixture.messageId,
+      sequence: 1,
+      textSnapshot: "Answer",
+      partsSnapshot: [{ type: "text", text: "Answer", providerMetadata: {
+        openai: { phase: "final_answer" },
+      } }],
+      workSummaryDurationMs: 1200,
+    })
+    await markGenerationRunAbortedForChat(ctx, owner, {
+      messageId: fixture.messageId,
+      reason: "stream aborted",
+      workDurationMs: 2500,
+    })
+    expect(fixture.message.metadata).toMatchObject({
+      workSummaryDurationMs: 1200,
+      workDurationMs: 2500,
+    })
+  })
+
   it("applies a checkpoint without retaining a routine snapshot row", async () => {
     const fixture = createGenerationRunLinkageFixture()
     const { ctx, inserts } = createMutationCtx(fixture.tables)

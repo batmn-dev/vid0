@@ -522,6 +522,115 @@ it("keeps a checkpoint painted while discovery was pending", async () => {
 
 it.each([
   {
+    name: "reasoning encryption completed",
+    checkpointPart: {
+      type: "reasoning",
+      text: "",
+      state: "streaming",
+      providerMetadata: { openai: { itemId: "r", reasoningEncryptedContent: null } },
+    },
+    history: [
+      { type: "reasoning-start", id: "r", providerMetadata: { openai: { itemId: "r", reasoningEncryptedContent: null } } },
+      { type: "reasoning-end", id: "r", providerMetadata: { openai: { itemId: "r", reasoningEncryptedContent: "encrypted-final" } } },
+      { type: "text-start", id: "answer" },
+      { type: "text-delta", id: "answer", delta: "Recovered answer" },
+    ],
+    accepts: true,
+  },
+  {
+    name: "opaque text metadata replaced",
+    checkpointPart: {
+      type: "text",
+      text: "Recovered",
+      state: "streaming",
+      providerMetadata: { openai: { phase: "final_answer", opaque: null } },
+    },
+    history: [
+      { type: "text-start", id: "answer", providerMetadata: { openai: { phase: "final_answer", opaque: "complete" } } },
+      { type: "text-delta", id: "answer", delta: "Recovered answer" },
+    ],
+    accepts: true,
+  },
+  {
+    name: "final answer reclassified as commentary",
+    checkpointPart: {
+      type: "text",
+      text: "Recovered",
+      state: "streaming",
+      providerMetadata: { openai: { phase: "final_answer" } },
+    },
+    history: [
+      { type: "text-start", id: "answer", providerMetadata: { openai: { phase: "commentary" } } },
+      { type: "text-delta", id: "answer", delta: "Recovered answer" },
+    ],
+    accepts: false,
+  },
+] satisfies {
+  name: string
+  checkpointPart: UIMessage["parts"][number]
+  history: UIMessageChunk[]
+  accepts: boolean
+}[])("guards visible replay content when $name", async ({ checkpointPart, history, accepts }) => {
+  const message: UIMessage = {
+    id: "assistant",
+    role: "assistant",
+    parts: [{ type: "text", text: "Saved" }, checkpointPart],
+  }
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(frame({ type: "base", highWater: "9-0", message: {
+        ...message, parts: [message.parts[0]],
+      } }))
+      history.forEach((chunk, index) => controller.enqueue(
+        frame({ type: "chunk", id: `${index + 1}-0`, chunk })
+      ))
+      controller.enqueue(frame({ type: "caught-up" }))
+      controller.enqueue(frame({ type: "chunk", id: "10-0", chunk: {
+        type: "text-delta", id: "answer", delta: " keeps streaming",
+      } }))
+      controller.enqueue(frame({ type: "end" }))
+      controller.close()
+    },
+  }))))
+  const chat = new ResumableChat({ messages: [message] })
+  const updates: UIMessage[] = []
+  chat["~registerMessagesCallback"](() => updates.push(chat.messages[0]))
+  chat.syncRun({
+    chatId: "chat", runId: "run", assistantMessageId: "assistant", status: "streaming",
+  }, [message])
+  await vi.waitFor(() => expect(chat.replayRunId).toBeNull())
+  if (!accepts) {
+    expect(updates).toEqual([])
+    expect(chat.messages[0]).toEqual(message)
+    return
+  }
+  const text = (value: UIMessage) => value.parts.flatMap(
+    (part) => part.type === "text" ? [part.text] : []
+  ).join("")
+  expect(updates.map(text)).toEqual([
+    "SavedRecovered answer",
+    "SavedRecovered answer keeps streaming",
+  ])
+})
+
+it.each([
+  {
+    name: "phased final text",
+    checkpoint: {
+      type: "text",
+      text: "Answer",
+      state: "done",
+      providerMetadata: { openai: { phase: "final_answer" } },
+    },
+    history: [],
+    catchUp: [
+      { type: "start-step" },
+      { type: "text-start", id: "final", providerMetadata: { openai: { phase: "final_answer" } } },
+      { type: "text-delta", id: "final", delta: "Answer" },
+      { type: "text-end", id: "final" },
+    ],
+  },
+  {
     name: "tool result",
     checkpoint: {
       type: "tool-search",
@@ -663,7 +772,17 @@ it.each([
     source.close()
     await vi.waitFor(() => expect(chat.replayRunId).toBeNull())
     expect(updates.length).toBeGreaterThan(0)
-    for (const update of updates) expect(update.parts).toEqual(message.parts)
+    for (const update of updates) {
+      if (checkpoint.type === "text") {
+        const visibleParts = update.parts.filter((part) => part.type !== "step-start")
+        expect(visibleParts).toEqual([
+          message.parts[0],
+          { ...checkpoint, state: expect.stringMatching(/^(streaming|done)$/) },
+        ])
+      } else {
+        expect(update.parts).toEqual(message.parts)
+      }
+    }
   }
 )
 

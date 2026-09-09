@@ -130,6 +130,10 @@ the no-cv probe isolated — a candidate for a later, smaller experiment.
 
 ## Residual-B2 follow-up — turn-level c-v/:has() (2026-08-28, later)
 
+> Superseded on 2026-09-08: whole-turn containment is now removed. The
+> Markdown-block optimization above remains unchanged. See the completion
+> correction below.
+
 Re-probed on the CURRENT build (the settled-block c-v fix shipped): the
 pre-fix 742 → 476 ms delta no longer exists — the block-level fix already
 absorbed most of the turn machinery's cost. Fresh single-run traces at
@@ -171,3 +175,27 @@ covers the page lifetime including the post-terminal decay-fade window.
 Absolute TBT numbers are only comparable within one session on this
 machine — for regressions, A/B on the same session (or the pinned CI
 runner with relative thresholds).
+
+## Completion scroll correction (2026-09-08)
+
+Authenticated Chrome reproduced a long Batman answer jumping from scrollTop
+30,447.5 to 15,737.5 at completion while its 15,825 rendered text characters
+and 15,838px Markdown height stayed unchanged. The turn acquired
+`content-visibility: auto` with `contain-intrinsic-size: auto 100lvh` only
+after streaming. Without a remembered turn size, its fallback could temporarily
+shrink the scroll range and clamp the reader's position.
+
+Remove whole-turn containment, keeping the existing Markdown-block containment,
+canonical SDK stream, incremental block identities, and decay overlay. Delaying
+the same toggle until the next send only moves the failure. Recording and DOM
+checks on the corrected build preserved scrollTop 40,328.5 through completion;
+the new answer retained all 15,342 rendered characters. A continuous 60fps window
+recording covers that run. These checks verify completion behavior, not a new
+performance benchmark; the earlier 218ms versus 217ms probe supports the scope.
+
+Actual-Markdown integration coverage now checks text-end, completion, and
+terminal saved-message adoption for both reasoning/story and commentary/tool
+turns, retaining earlier DOM nodes and exact final answer text. The conversation
+test also checks stable wrapper identity and sizing classes across settlement.
+Evidence: `output/thinking-ui-parity-20260908/exact-lifecycle/completion-regression/`
+(`before2-dom.json`, `after-dom.json`, `after-continuous.mov`).

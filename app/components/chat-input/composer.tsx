@@ -618,6 +618,7 @@ export const Composer = memo(
           >
             <PromptInput
               expanded={localValue.includes("\n")}
+              draftKey={draftIdentity.displayId}
               value={localValue}
               onValueChange={handleValueChange}
               onSubmit={handleComposerSubmit}

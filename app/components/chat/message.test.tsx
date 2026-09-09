@@ -265,7 +265,7 @@ describe("Message body memo contract", () => {
     })
   }
 
-  it("does not re-render the body when only reasoning/source parts change during streaming", () => {
+  it("updates inline work when reasoning/source parts change during streaming", () => {
     const partsA = [
       { type: "reasoning", text: "thinking", state: "streaming" },
     ] as unknown as UIMessage["parts"]
@@ -293,8 +293,8 @@ describe("Message body memo contract", () => {
       children: "",
     })
 
-    // Reasoning + source deltas are panel-owned now; the body must not churn.
-    expect(messageAssistantSpy).toHaveBeenCalledTimes(1)
+    // Inline work now renders these facts inside the assistant row.
+    expect(messageAssistantSpy).toHaveBeenCalledTimes(2)
   })
 
   it("re-renders the body on a real text delta during streaming", () => {

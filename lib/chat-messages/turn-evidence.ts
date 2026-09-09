@@ -60,10 +60,7 @@ export type SearchImageResult = {
 
 /** The single declaration of tool-name classification. */
 export type ToolClassification =
-  | "search"
-  | "image-generation"
-  | "image-search"
-  | "generic"
+  "search" | "image-generation" | "image-search" | "generic"
 
 const TOOL_CLASSIFICATIONS: Record<string, ToolClassification> = {
   web_search: "search",
@@ -189,11 +186,19 @@ export type ImpliedSearchEvidence = {
 }
 
 export type TurnEvidenceItem =
-  | ReasoningEvidence
-  | ToolCallEvidence
-  | ImpliedSearchEvidence
+  ReasoningEvidence | ToolCallEvidence | ImpliedSearchEvidence
+
+export type TextEvidence = {
+  id: string
+  text: string
+  phase: "commentary" | "final_answer" | undefined
+  isStreaming: boolean
+  /** Number of activity items preceding this text in canonical part order. */
+  activityOffset: number
+}
 
 export type TurnEvidence = {
+  textBlocks: readonly TextEvidence[]
   /** Chronological, ordered by first appearance in part order. */
   timeline: readonly TurnEvidenceItem[]
   /** Turn-level deduped sources — identical to `getSources(parts)`. */
@@ -203,12 +208,7 @@ export type TurnEvidence = {
 }
 
 export type ResolvedEntryStatus =
-  | "running"
-  | "complete"
-  | "approval"
-  | "error"
-  | "denied"
-  | "stopped"
+  "running" | "complete" | "approval" | "error" | "denied" | "stopped"
 
 /**
  * The one place liveness meets lifecycle: part states freeze in place on
@@ -339,7 +339,11 @@ function interpretWebActivity(part: ToolEvidenceUIPart): WebActivityAction {
     case "findInPage":
     case "find_in_page":
       return url
-        ? { kind: "found-in-page", url, pattern: nonEmptyString(record.pattern) }
+        ? {
+            kind: "found-in-page",
+            url,
+            pattern: nonEmptyString(record.pattern),
+          }
         : { kind: "unknown" }
     default:
       return { kind: "unknown" }
@@ -378,6 +382,7 @@ export function deriveTurnEvidence(
   parts: UIMessage["parts"] | undefined
 ): TurnEvidence {
   const timeline: TurnEvidenceItem[] = []
+  const textBlocks: TextEvidence[] = []
   const toolItemIndexes = new Map<string, number>()
   const searchItemIndexes = new Map<string, number>()
   const pendingSources = new Map<string, AssistantSourceResult[]>()
@@ -394,6 +399,20 @@ export function deriveTurnEvidence(
   }
 
   ;(parts ?? []).forEach((part, partIndex) => {
+    if (part.type === "text") {
+      const phase = part.providerMetadata?.openai?.phase
+      textBlocks.push({
+        id: `text-${partIndex}`,
+        text: part.text,
+        phase:
+          phase === "commentary" || phase === "final_answer"
+            ? phase
+            : undefined,
+        isStreaming: part.state === "streaming",
+        activityOffset: timeline.length,
+      })
+      return
+    }
     if (part.type === "reasoning") {
       timeline.push({
         kind: "reasoning",
@@ -476,6 +495,7 @@ export function deriveTurnEvidence(
   })
 
   return {
+    textBlocks,
     timeline,
     sources: getSources(parts ?? []),
     searchImageResults,

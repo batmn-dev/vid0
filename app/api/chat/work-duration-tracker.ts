@@ -1,3 +1,5 @@
+import type { TextStreamPart, ToolSet } from "ai"
+
 export type WorkDurationTracker = {
   close: () => void
   getDurationMs: () => number
@@ -28,5 +30,30 @@ export function createWorkDurationTracker(options?: {
       const endMs = stoppedAtMs ?? now()
       return initialDurationMs + Math.max(0, endMs - startedAtMs)
     },
+  }
+}
+
+/** Pre-answer display timing is separate from total generation accounting. */
+export function createWorkSummaryDurationTracker(
+  getWorkDurationMs: () => number
+) {
+  const textStarts = new Map<string, number>()
+  let durationMs: number | undefined
+
+  return {
+    observe(part: TextStreamPart<ToolSet>) {
+      if (durationMs !== undefined) return
+      if (part.type !== "text-start" && part.type !== "text-end") return
+      if (part.type === "text-start" && !textStarts.has(part.id)) {
+        textStarts.set(part.id, getWorkDurationMs())
+      }
+      if (part.providerMetadata?.openai?.phase === "final_answer") {
+        durationMs = textStarts.get(part.id) ?? getWorkDurationMs()
+        textStarts.clear()
+      } else if (part.type === "text-end") {
+        textStarts.delete(part.id)
+      }
+    },
+    getDurationMs: () => durationMs,
   }
 }

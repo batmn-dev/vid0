@@ -95,6 +95,40 @@ describe("MessageAssistant activity trigger", () => {
     root = createRoot(container)
   })
 
+  it.each(["ready", "aborted"] as const)(
+    "retains copy for commentary-only %s turns",
+    (status) => {
+      const view = makeView(
+        [
+          {
+            type: "text",
+            text: "I found an initial lead.",
+            state: "done",
+            providerMetadata: { openai: { phase: "commentary" } },
+          },
+        ],
+        "ready"
+      )
+      act(() => {
+        root?.render(
+          <ActivityPanelStoreProvider store={makeStore({})}>
+            <MessageAssistant
+              view={view}
+              messageId="assistant-1"
+              status={status}
+              isLast
+            >
+              {view.text}
+            </MessageAssistant>
+          </ActivityPanelStoreProvider>
+        )
+      })
+      expect(
+        container?.querySelector('button[aria-label="Copy response"]')
+      ).not.toBeNull()
+    }
+  )
+
   it("renders the generation stats line on settled turns behind the preference", () => {
     const store = makeStore({ panelTurnId: "assistant-1" })
     const parts = [{ type: "text", text: "Answer" }] as UIMessage["parts"]
@@ -271,48 +305,6 @@ describe("MessageAssistant activity trigger", () => {
     expect(store.getState().open).toBe(false)
   })
 
-  it("renders one timed disclosure for opaque reasoning with search activity", () => {
-    const store = makeStore({ panelTurnId: "assistant-1" })
-    const parts = [
-      { type: "reasoning", text: "", state: "done" },
-      {
-        type: "tool-web_search",
-        toolCallId: "search-1",
-        state: "output-available",
-        input: { query: "Tommy Geoco" },
-        output: {},
-      },
-    ] as unknown as UIMessage["parts"]
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-1"
-            view={makeView(parts, "ready", {
-              reasoningDurationMs: 436,
-              workDurationMs: 4600,
-            })}
-            status="ready"
-          >
-            {"Answer"}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    const indicator = container?.querySelector(
-      '[data-activity-presentation="disclosure"]'
-    )
-    expect(indicator?.textContent).toBe("Worked for 4s")
-    expect(
-      container?.querySelector(
-        'button[aria-label="Open activity: Worked for 4s"]'
-      )
-    ).toBeTruthy()
-    expect(container?.textContent).not.toContain("Thought for")
-  })
-
   it("preserves the current-session duration while finish metadata hydrates", () => {
     const store = makeStore({
       panelTurnId: "assistant-1",
@@ -366,172 +358,6 @@ describe("MessageAssistant activity trigger", () => {
     expect(container?.querySelector("button[aria-expanded]")).toBeNull()
   })
 
-  it("renders passive Thinking for submitted pre-stream state", () => {
-    const store = makeStore({ panelTurnId: "pending-assistant" })
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="pending-assistant"
-            view={makeView([], "submitted")}
-            status="submitted"
-            isLast
-          >
-            {""}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    expect(container?.textContent).toContain("Thinking")
-    expect(container?.textContent).not.toContain("Generating")
-    expect(container?.querySelector("button[aria-expanded]")).toBeNull()
-    const messageSlot = container?.querySelector(".text-message")
-    expect(messageSlot).toBeTruthy()
-    expect(messageSlot?.querySelector('[aria-busy="true"]')?.textContent).toBe(
-      "Thinking"
-    )
-    expect(
-      messageSlot?.querySelector(".loading-shimmer-tertiary")?.tagName
-    ).toBe("DIV")
-  })
-
-  it("replaces bare Thinking in the same message slot and settles the response presentation", async () => {
-    const store = makeStore({ panelTurnId: "pending-assistant" })
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="pending-assistant"
-            view={makeView([], "submitted")}
-            status="submitted"
-            isLast
-          >
-            {""}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    const messageSlot = container?.querySelector(".text-message")
-    expect(messageSlot?.querySelector('[aria-busy="true"]')).toBeTruthy()
-
-    await act(async () => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-1"
-            view={makeView(
-              [{ type: "text", text: "Hello from the assistant" }],
-              "streaming"
-            )}
-            status="streaming"
-            isLast
-          >
-            {"Hello from the assistant"}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-      await Promise.resolve()
-    })
-
-    const streamingMessageSlot = container?.querySelector(".text-message")
-    expect(streamingMessageSlot).toBe(messageSlot)
-    expect(streamingMessageSlot?.querySelector('[aria-busy="true"]')).toBeNull()
-    expect(
-      streamingMessageSlot?.querySelector(".streaming-animation")?.textContent
-    ).toContain("Hello from the assistant")
-
-    await act(async () => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-1"
-            view={makeView(
-              [{ type: "text", text: "Hello from the assistant" }],
-              "ready"
-            )}
-            status="ready"
-            isLast
-          >
-            {"Hello from the assistant"}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-      await Promise.resolve()
-    })
-
-    expect(container?.querySelector(".streaming-animation")).toBeNull()
-  })
-
-  it("keeps one 32px activity slot from bare Thinking into its disclosure", () => {
-    const store = makeStore({ panelTurnId: "assistant-1" })
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-1"
-            view={makeView([], "submitted")}
-            status="submitted"
-            isLast
-          >
-            {""}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    const turn = container?.firstElementChild
-    const initialSlot = container?.querySelector(
-      '[data-slot="assistant-activity"]'
-    )
-    expect(initialSlot?.className).toContain("min-h-8")
-    expect(initialSlot?.getAttribute("data-activity-presentation")).toBe(
-      "live-status"
-    )
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-1"
-            view={makeView(
-              [
-                {
-                  type: "reasoning",
-                  text: "Visible reasoning",
-                  state: "streaming",
-                },
-              ] as unknown as UIMessage["parts"],
-              "streaming"
-            )}
-            status="streaming"
-            isLast
-          >
-            {""}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    const disclosureSlot = container?.querySelector(
-      '[data-slot="assistant-activity"]'
-    )
-    expect(container?.firstElementChild).toBe(turn)
-    expect(disclosureSlot?.className).toContain("min-h-8")
-    expect(disclosureSlot?.getAttribute("data-activity-presentation")).toBe(
-      "disclosure"
-    )
-    expect(
-      disclosureSlot?.querySelector(
-        'button[aria-label="Open activity: Thinking"]'
-      )
-    ).toBeTruthy()
-  })
-
   it("shows only passive Thinking while opaque reasoning streams", () => {
     const store = makeStore({ panelTurnId: "assistant-1" })
     const parts = [
@@ -558,192 +384,7 @@ describe("MessageAssistant activity trigger", () => {
     expect(container?.textContent).not.toContain("Generating")
   })
 
-  it("shows ONLY the running trigger while a tool call is in flight", () => {
-    const store = makeStore({ panelTurnId: "assistant-1" })
-    const parts = [
-      { type: "reasoning", text: "…", state: "streaming" },
-      {
-        type: "tool-web_search",
-        toolCallId: "t1",
-        state: "input-available",
-        input: { query: "q" },
-      },
-    ] as unknown as UIMessage["parts"]
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-1"
-            view={makeView(parts, "streaming")}
-            status="streaming"
-            isLast
-          >
-            {""}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    expect(
-      container?.querySelector(
-        'button[aria-label="Open activity: Searching for q"]'
-      )
-    ).toBeTruthy()
-    expect(container?.textContent).not.toContain("Generating")
-    expect(container?.textContent).not.toContain("Thinking")
-  })
-
-  it("keeps historical reasoning triggers visible when another turn owns the panel", () => {
-    const store = makeStore({ panelTurnId: "pending-assistant", open: true })
-    const parts = [
-      { type: "reasoning", text: "historical reasoning", state: "done" },
-    ] as unknown as UIMessage["parts"]
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-1"
-            view={makeView(parts, "ready", { reasoningDurationMs: 2000 })}
-            status="ready"
-          >
-            {"First answer"}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    const trigger = container?.querySelector(
-      'button[aria-label="Open activity: Thought for 2s"]'
-    ) as HTMLButtonElement | null
-
-    expect(trigger).toBeTruthy()
-    expect(trigger?.getAttribute("aria-expanded")).toBe("false")
-  })
-
-  it("renders one trigger per completed reasoning turn and only expands the selected turn", () => {
-    const store = makeStore({ panelTurnId: "assistant-2", open: true })
-    const parts = [
-      { type: "reasoning", text: "reasoning", state: "done" },
-    ] as unknown as UIMessage["parts"]
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-1"
-            view={makeView(parts, "ready", { reasoningDurationMs: 1000 })}
-            status="ready"
-          >
-            {"First answer"}
-          </MessageAssistant>
-          <MessageAssistant
-            messageId="assistant-2"
-            view={makeView(parts, "ready", { reasoningDurationMs: 2000 })}
-            status="ready"
-          >
-            {"Second answer"}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    const triggers = Array.from(
-      container?.querySelectorAll<HTMLButtonElement>(
-        'button[aria-controls="activity-panel"]'
-      ) ?? []
-    )
-
-    expect(triggers).toHaveLength(2)
-    expect(triggers[0]?.getAttribute("aria-expanded")).toBe("false")
-    expect(triggers[1]?.getAttribute("aria-expanded")).toBe("true")
-    expect(container?.textContent).toContain("Thought for 1s")
-    expect(container?.textContent).toContain("Thought for 2s")
-  })
-
-  it("retargets the open panel when a different trigger is clicked", () => {
-    const store = makeStore({
-      panelTurnId: "assistant-1",
-      defaultTurnId: "assistant-1",
-      open: true,
-    })
-    const parts = [
-      { type: "reasoning", text: "reasoning", state: "done" },
-    ] as unknown as UIMessage["parts"]
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-2"
-            view={makeView(parts, "ready", { reasoningDurationMs: 2000 })}
-            status="ready"
-          >
-            {"Second answer"}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    const trigger = container?.querySelector(
-      'button[aria-label="Open activity: Thought for 2s"]'
-    ) as HTMLButtonElement | null
-
-    act(() => {
-      trigger?.click()
-    })
-
-    // Clicking a non-default turn records an explicit selection and retargets
-    // the panel in the same commit.
-    expect(store.getState().open).toBe(true)
-    expect(store.getState().panelTurnId).toBe("assistant-2")
-    expect(store.getState().selectedTurnId).toBe("assistant-2")
-  })
-
-  it("closes the panel from the expanded trigger and clears the selection", () => {
-    const store = makeStore({
-      panelTurnId: "assistant-1",
-      defaultTurnId: "assistant-1",
-      open: true,
-    })
-    const parts = [
-      { type: "reasoning", text: "reasoning", state: "done" },
-    ] as unknown as UIMessage["parts"]
-
-    act(() => {
-      root?.render(
-        <ActivityPanelStoreProvider store={store} panelId="activity-panel">
-          <MessageAssistant
-            messageId="assistant-1"
-            view={makeView(parts, "ready", { reasoningDurationMs: 2000 })}
-            status="ready"
-          >
-            {"Answer"}
-          </MessageAssistant>
-        </ActivityPanelStoreProvider>
-      )
-    })
-
-    const trigger = container?.querySelector(
-      'button[aria-label="Close activity: Thought for 2s"]'
-    ) as HTMLButtonElement | null
-    expect(trigger?.getAttribute("aria-expanded")).toBe("true")
-
-    act(() => {
-      trigger?.click()
-    })
-
-    expect(store.getState().open).toBe(false)
-    expect(store.getState().selectedTurnId).toBeUndefined()
-    expect(
-      container
-        ?.querySelector('button[aria-controls="activity-panel"]')
-        ?.getAttribute("aria-expanded")
-    ).toBe("false")
-  })
-
-  it("renders no trigger without a hosted panel (outside the provider)", () => {
+  it("keeps inline work independent of the activity panel", () => {
     const parts = [
       { type: "reasoning", text: "reasoning", state: "done" },
     ] as unknown as UIMessage["parts"]
@@ -1095,6 +736,59 @@ describe("MessageAssistant activity trigger", () => {
     expect(container?.textContent).toContain(
       "A settled answer with markdown in it."
     )
+  })
+
+  it("replaces live work with its summary and answer in the same update", async () => {
+    const commentary = {
+      type: "text",
+      text: "Checking",
+      state: "streaming",
+      providerMetadata: { openai: { phase: "commentary" } },
+    } satisfies UIMessage["parts"][number]
+    const renderParts = async (parts: UIMessage["parts"]) => {
+      const view = makeView(parts, "streaming", {
+        provider: "openai",
+        workSummaryDurationMs: 36000,
+      })
+      await act(async () => {
+        root?.render(
+          <MessageAssistant
+            messageId="handoff"
+            view={view}
+            status="streaming"
+            isLast
+          >
+            {view.text}
+          </MessageAssistant>
+        )
+      })
+    }
+    await renderParts([commentary])
+    expect(
+      container?.querySelector(".inline-work-narrative")?.textContent
+    ).toBe("Checking")
+    await renderParts([
+      { ...commentary, text: "Checking is complete.", state: "done" },
+      {
+        type: "text",
+        text: "The answer starts now.",
+        state: "streaming",
+        providerMetadata: { openai: { phase: "final_answer" } },
+      },
+    ])
+    expect(container?.querySelector("[data-inline-work-live]")).toBeNull()
+    expect(container?.querySelector(".inline-work-narrative")).toBeNull()
+    expect(container?.querySelector(".text-message")?.textContent).toBe(
+      "The answer starts now."
+    )
+    const summary = Array.from(
+      container?.querySelectorAll("button") ?? []
+    ).find((button) => button.textContent === "Worked for 36s")
+    expect(summary).toBeTruthy()
+    await act(async () => summary?.click())
+    expect(
+      container?.querySelector(".inline-work-narrative")?.textContent
+    ).toBe("Checking is complete.")
   })
 
   it("keeps a Retry control on an aborted turn whose only preserved content is a tool card", async () => {

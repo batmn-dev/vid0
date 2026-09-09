@@ -41,7 +41,7 @@ import type {
   ToolSet,
   UIMessage,
 } from "ai"
-import { isToolUIPart } from "ai"
+import { isToolUIPart, readUIMessageStream, toUIMessageStream } from "ai"
 import { fetchMutation as defaultFetchMutation } from "convex/nextjs"
 import { extractApprovalResponses } from "./approval-continuation"
 import { PublicChatHttpError } from "./public-http-error"
@@ -321,7 +321,7 @@ export type DurableStreamBinding = {
     recordTitleUsageEvidence(
       evidence: TitleTerminalUsageEvidence
     ): Promise<boolean>
-    onChunk(chunk: TextStreamPart<ToolSet>): void
+    onChunk(chunk: TextStreamPart<ToolSet>, workSummaryDurationMs?: number): Promise<void> | void
     recordStep(step: DurableStepRecord): void
     noteStreamError(
       failure: DurableFailure,
@@ -589,9 +589,6 @@ function sleep(ms: number): Promise<void> {
 // Durable snapshot tracker — throttled assistant-snapshot writes plus the
 // final full-parts snapshot settlement takes before any terminal transition.
 
-type SnapshotPart =
-  { type: "text"; text: string } | { type: "reasoning"; text: string }
-
 const WORKER_WRITE_TIMEOUT_MS = 10_000
 
 class WorkerWriteTimeoutError extends Error {
@@ -641,10 +638,12 @@ export type SnapshotPersistArgs = {
   sequence: number
   textSnapshot: string
   partsSnapshot: unknown
+  workSummaryDurationMs?: number
 }
 
 type DurableSnapshotTrackerOptions = {
   throttleMs?: number
+  initialMessage?: UIMessage
   /**
    * Injected snapshot persister — the runtime hands in a worker-wire-backed
    * writer, so the tracker never sees a credential or a transport.
@@ -657,7 +656,8 @@ export function createDurableSnapshotTracker(
 ) {
   const persistSnapshot = options.persist
   let text = ""
-  let reasoning = ""
+  let parts: UIMessage["parts"] = []
+  let workSummaryDurationMs: number | undefined
   let sequence = 0
   let lastWriteAt = 0
   let writeInFlight: Promise<unknown> | null = null
@@ -670,10 +670,7 @@ export function createDurableSnapshotTracker(
   let contentVersion = 0
   let writtenVersion = 0
 
-  const getParts = (): SnapshotPart[] => [
-    ...(reasoning ? [{ type: "reasoning" as const, text: reasoning }] : []),
-    ...(text ? [{ type: "text" as const, text }] : []),
-  ]
+  const getParts = () => parts
 
   const persist = async (force = false) => {
     while (writtenVersion < contentVersion) {
@@ -694,6 +691,7 @@ export function createDurableSnapshotTracker(
           sequence: currentSequence,
           textSnapshot: text,
           partsSnapshot: getParts(),
+          ...(workSummaryDurationMs !== undefined ? { workSummaryDurationMs } : {}),
         }),
         "writing assistant snapshot"
       )
@@ -709,22 +707,75 @@ export function createDurableSnapshotTracker(
     }
   }
 
-  const onChunk = (chunk: TextStreamPart<ToolSet>) => {
-    if (chunk.type === "text-delta") {
-      text += chunk.text
-      contentVersion++
-      void persist(false).catch(() => {})
-    } else if (chunk.type === "reasoning-delta") {
-      reasoning += chunk.text
+  // Use the same SDK projection as the delivered stream: tool states, text
+  // boundaries, and provider phase metadata must survive a live checkpoint.
+  const input = new TransformStream<TextStreamPart<ToolSet>>()
+  const writer = input.writable.getWriter()
+  const reader = readUIMessageStream({
+    message: options.initialMessage,
+    stream: toUIMessageStream({
+      stream: input.readable,
+      originalMessages: options.initialMessage ? [options.initialMessage] : undefined,
+      sendSources: true,
+      sendReasoning: true,
+    }),
+    terminateOnError: true,
+  }).getReader()
+  const reduction = (async () => {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) return
+      const message = next.value
+      parts = message.parts
+      text = extractTextFromMessageParts(parts)
+      // Start chunks alone must not replace a useful durable checkpoint.
+      if (workSummaryDurationMs === undefined && !parts.some((part) =>
+        part.type === "text" || part.type === "reasoning"
+          ? part.text.length > 0
+          : part.type !== "step-start"
+      )) continue
       contentVersion++
       void persist(false).catch(() => {})
     }
+  })()
+  void reduction.catch((error: unknown) => {
+    void writer.abort(error).catch(() => {})
+  })
+  let writes = Promise.resolve()
+  let closing: Promise<void> | undefined
+  const onChunk = (chunk: TextStreamPart<ToolSet>, summaryDurationMs?: number) => {
+    if (closing) return Promise.resolve()
+    if (summaryDurationMs !== undefined) workSummaryDurationMs = summaryDurationMs
+    writes = writes.then(() => withWorkerWriteTimeout(
+      writer.write(chunk), "reducing assistant snapshot chunk"
+    )).catch((error: unknown) => {
+      void writer.abort(error).catch(() => {})
+      void reader.cancel(error).catch(() => {})
+      throw error
+    })
+    // Snapshot failure cannot erase the response being delivered.
+    void writes.catch(() => {})
+    return writes.catch(() => {})
+  }
+  const drain = () => {
+    closing ??= withWorkerWriteTimeout(
+      (async () => {
+        await writes
+        await writer.close()
+        await reduction
+      })(),
+      "draining assistant snapshot stream"
+    ).catch(async (error: unknown) => {
+      void writer.abort(error).catch(() => {})
+      await reader.cancel(error).catch(() => {})
+      throw error
+    })
+    return closing
   }
 
   /**
    * The content-survival write (ADR-0011): an unconditional snapshot carrying
-   * the response message's COMPLETE parts (tool parts included — the throttled
-   * writes carry only text/reasoning), sequenced after every throttled write.
+   * the response message's COMPLETE parts, sequenced after every throttled write.
    * Settlement calls it BEFORE the terminal transition so a failed terminal
    * write can no longer erase an answer: the snapshot mutation also lands
    * content+parts on the assistant message doc. Rejections propagate to the
@@ -734,6 +785,7 @@ export function createDurableSnapshotTracker(
    * content+parts itself.
    */
   const flushFinal = async (finalText: string, finalParts: unknown) => {
+    await drain().catch(() => {})
     if (writeInFlight) await writeInFlight.catch(() => {})
     const currentSequence = ++sequence
     writtenVersion = contentVersion
@@ -742,6 +794,7 @@ export function createDurableSnapshotTracker(
         sequence: currentSequence,
         textSnapshot: finalText,
         partsSnapshot: finalParts,
+        ...(workSummaryDurationMs !== undefined ? { workSummaryDurationMs } : {}),
       }),
       "writing assistant snapshot"
     )
@@ -749,7 +802,10 @@ export function createDurableSnapshotTracker(
 
   return {
     onChunk,
-    flush: () => persist(true),
+    flush: async () => {
+      await drain()
+      await persist(true)
+    },
     flushFinal,
     get textSnapshot() {
       return text
@@ -1565,6 +1621,9 @@ export function createConvexDurableTurn(args: {
         messageId: generation.assistantMessageId,
       }
       snapshotTracker = createDurableSnapshotTracker({
+        initialMessage: durableMessages.at(-1)?.role === "assistant"
+          ? durableMessages.at(-1)
+          : undefined,
         persist: (snapshotArgs) => {
           // Checkpoint counters: attempts/accepted/lost/failed
           // plus cumulative payload bytes. Sizes and enums only — the
@@ -1737,8 +1796,8 @@ export function createConvexDurableTurn(args: {
             }
           },
 
-          onChunk(chunk) {
-            tracker.onChunk(chunk)
+          onChunk(chunk, summaryDurationMs) {
+            return tracker.onChunk(chunk, summaryDurationMs)
           },
 
           recordStep({ stepNumber, usage, toolCalls, toolResults }) {
@@ -1920,8 +1979,8 @@ export function createConvexDurableTurn(args: {
               // final snapshot is unconditional — abort included — and carries
               // the COMPLETE response parts, so a failed terminal write (or an
               // abort, whose terminal write never carries parts) leaves the
-              // full answer on the message doc, not just the throttled
-              // text/reasoning subset.
+              // latest answer on the message doc, even if the last throttled
+              // checkpoint preceded the final chunks.
               deps.perf?.counter("final_flush")
               await tracker
                 .flushFinal(

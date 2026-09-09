@@ -16,6 +16,15 @@ import {
   type ToolFacts,
 } from "./durable-turn-runtime"
 
+const startedTextStreams = new WeakSet<object>()
+function emitTextChunk(stream: { onChunk: (chunk: TextStreamPart<ToolSet>) => unknown }, text: string) {
+  if (!startedTextStreams.has(stream)) {
+    startedTextStreams.add(stream)
+    stream.onChunk({ type: "text-start", id: "text-1" })
+  }
+  return stream.onChunk({ type: "text-delta", id: "text-1", text })
+}
+
 // Durable turn runtime — the interface IS the test surface (ADR-0009/0011).
 // The module default `fetchMutation` is never used by the Convex adapter (it
 // injects deps.fetchMutation) nor the guest adapter (no network) — mock it so
@@ -389,8 +398,8 @@ describe("durable turn runtime — settlement ordering", () => {
 
     // Dirty the snapshot: the first delta writes immediately, the throttled
     // second leaves the tracker dirty so the settle flush actually writes.
-    binding.stream.onChunk({ type: "text-delta", text: "A" } as never)
-    binding.stream.onChunk({ type: "text-delta", text: "B" } as never)
+    emitTextChunk(binding.stream, "A")
+    emitTextChunk(binding.stream, "B")
     await flush()
 
     binding.stream.captureFinish({
@@ -447,7 +456,7 @@ describe("durable turn runtime — settlement ordering", () => {
 
     const finalSnapshot = wireCalls(wire, "updateAssistantSnapshot").at(-1)
     // The final pre-terminal snapshot carries the COMPLETE response parts
-    // (tool parts included), not the tracker's text/reasoning subset.
+    // (tool parts included), even when the last checkpoint was throttled.
     expect(finalSnapshot?.args).toMatchObject({
       runId: "run1",
       messageId: "msg1",
@@ -468,6 +477,10 @@ describe("durable turn runtime — settlement ordering", () => {
   it("issues both abort writes with distinct reasons when stream onAbort precedes settle (double-terminal, first-terminal-wins)", async () => {
     const { turn, wire } = await makePreparedTurn()
     const binding = turn.bind(makeToolFacts())
+    await binding.stream.onChunk({
+      type: "text-start", id: "final", providerMetadata: { openai: { phase: "final_answer" } },
+    }, 1250)
+    await binding.stream.onChunk({ type: "text-delta", id: "final", text: "done" }, 1250)
 
     // The stream `onAbort` half flushes + marks aborted ("stream aborted")...
     await binding.stream.onAbort("stream aborted", 2500)
@@ -498,6 +511,9 @@ describe("durable turn runtime — settlement ordering", () => {
     // included — and precedes the envelope's abort mark, so an aborted answer
     // keeps its complete parts, not just the throttled subset.
     const ops = orderedOps(wire)
+    expect(wire.calls.slice(0, ops.indexOf("markGenerationRunAborted"))
+      .some((call) => call.op === "updateAssistantSnapshot" &&
+        call.args.workSummaryDurationMs === 1250)).toBe(true)
     const lastSnapshot = ops.lastIndexOf("updateAssistantSnapshot")
     expect(lastSnapshot).toBeGreaterThanOrEqual(0)
     expect(lastSnapshot).toBeLessThan(
@@ -912,7 +928,7 @@ describe("durable turn runtime — settlement receipts (never rejects)", () => {
       const binding = turn.bind(makeToolFacts())
 
       // Stream chunk → throttled snapshot write → 401 discovers revocation.
-      binding.stream.onChunk({ type: "text-delta", text: "partial" } as never)
+      emitTextChunk(binding.stream, "partial")
       await vi.waitFor(() => {
         expect(wireCalls(wire, "updateAssistantSnapshot")).toHaveLength(1)
       })
@@ -968,7 +984,7 @@ describe("durable turn runtime — settlement receipts (never rejects)", () => {
       const { turn } = await makePreparedTurn({ wire })
       const binding = turn.bind(makeToolFacts())
 
-      binding.stream.onChunk({ type: "text-delta", text: "partial" } as never)
+      emitTextChunk(binding.stream, "partial")
       await vi.waitFor(() => {
         expect(turn.executionAbortSignal.aborted).toBe(true)
       })
@@ -1059,7 +1075,7 @@ describe("durable turn runtime — settlement receipts (never rejects)", () => {
       })
 
       // A later snapshot chunk is gated locally — no second 401.
-      binding.stream.onChunk({ type: "text-delta", text: "tail" } as never)
+      emitTextChunk(binding.stream, "tail")
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(wireCalls(wire, "recordToolInvocations")).toHaveLength(1)
       expect(wireCalls(wire, "updateAssistantSnapshot")).toHaveLength(0)
@@ -1624,7 +1640,7 @@ describe("durable turn runtime — guest inertness", () => {
     expect(identity.generateMessageId).toBeUndefined()
 
     // Every write method is an inert no-op; settle resolves the guest receipt.
-    binding.stream.onChunk({ type: "text-delta", text: "A" } as never)
+    emitTextChunk(binding.stream, "A")
     binding.stream.recordStep({
       stepNumber: 1,
       toolCalls: [{ toolCallId: "c", toolName: "t", input: {} }],
@@ -1744,10 +1760,7 @@ describe("durable turn runtime — cancellation terminal-usage evidence (ADR-002
       input: { reservationId: RESERVATION_ID },
     })
     const binding = turn.bind(makeToolFacts())
-    binding.stream.onChunk({
-      type: "text-delta",
-      text: "partial answer!!",
-    } as TextStreamPart<ToolSet>)
+    emitTextChunk(binding.stream, "partial answer!!")
 
     await binding.stream.onAbort("stream aborted", 1_000, {
       primary: { kind: "completed-steps", inputTokens: 500, outputTokens: 20 },

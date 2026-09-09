@@ -156,8 +156,8 @@ describe("MessageUser attachments", () => {
 
     expect(toggleIconWrapper?.tagName).toBe("DIV")
     expect(toggleIconWrapper?.className).toContain("size-4")
-    expect(toggleIcon?.getAttribute("viewBox")).toBe("0 0 16 16")
-    expect(toggleIcon?.classList.contains("size-4")).toBe(true)
+    expect(toggleIcon?.getAttribute("viewBox")).toBe("0 0 24 24")
+    expect(toggleIcon?.parentElement?.getAttribute("aria-hidden")).toBe("true")
 
     act(() => {
       toggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }))

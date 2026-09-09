@@ -51,12 +51,15 @@ function hasVisiblePrefix(next: UIMessage, previous: UIMessage | undefined) {
     (part) => part.type !== "step-start"
   )
   const nextParts = next.parts.filter((part) => part.type !== "step-start")
-  // Durable in-flight checkpoints aggregate text/reasoning across SDK steps.
-  // Match their visible content without requiring the richer replay's layout.
+  // Legacy checkpoints have only aggregated strings. SDK checkpoints retain
+  // state/metadata and require ordered boundaries, including text phase.
   if (
+    previousParts.length <= 2 &&
     previousParts.every(
-      (part) => part.type === "text" || part.type === "reasoning"
-    )
+      (part) => (part.type === "text" || part.type === "reasoning") &&
+        part.state === undefined && part.providerMetadata === undefined
+    ) &&
+    new Set(previousParts.map((part) => part.type)).size === previousParts.length
   ) {
     return (["text", "reasoning"] as const).every((type) => {
       const before = previousParts
@@ -71,8 +74,17 @@ function hasVisiblePrefix(next: UIMessage, previous: UIMessage | undefined) {
   return previousParts.every((part, index) => {
     const candidate = nextParts[index]
     if (!candidate || candidate.type !== part.type) return false
-    if (part.type === "text" || part.type === "reasoning")
-      return "text" in candidate && candidate.text.startsWith(part.text)
+    if (part.type === "text" || part.type === "reasoning") {
+      if (!("text" in candidate) || !candidate.text.startsWith(part.text))
+        return false
+      // Phase changes move text between work and answer. Opaque metadata,
+      // such as encrypted reasoning, can legitimately be replaced at the end.
+      const phase = part.type === "text"
+        ? part.providerMetadata?.openai?.phase
+        : undefined
+      return (phase !== "commentary" && phase !== "final_answer") ||
+        candidate.providerMetadata?.openai?.phase === phase
+    }
     if (isToolUIPart(part) && isToolUIPart(candidate)) {
       if (part.toolCallId !== candidate.toolCallId) return false
       const progress = toolProgress[candidate.state] - toolProgress[part.state]

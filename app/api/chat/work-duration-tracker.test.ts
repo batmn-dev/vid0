@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { createWorkDurationTracker } from "./work-duration-tracker"
+import {
+  createWorkDurationTracker,
+  createWorkSummaryDurationTracker,
+} from "./work-duration-tracker"
 
 describe("createWorkDurationTracker", () => {
   it("includes reasoning, tool gaps, and answer generation continuously", () => {
@@ -32,5 +35,59 @@ describe("createWorkDurationTracker", () => {
     now = 23_600
     resumed.close()
     expect(resumed.getDurationMs()).toBe(6000)
+  })
+})
+
+describe("createWorkSummaryDurationTracker", () => {
+  it("freezes only an explicit final-answer boundary without changing total work", () => {
+    let now = 0
+    const total = createWorkDurationTracker({ now: () => now })
+    const summary = createWorkSummaryDurationTracker(total.getDurationMs)
+    now = 1000
+    summary.observe({
+      type: "text-start",
+      id: "commentary",
+      providerMetadata: {
+        openai: { phase: "commentary" },
+      },
+    })
+    now = 3000
+    summary.observe({
+      type: "text-start",
+      id: "final",
+      providerMetadata: {
+        openai: { phase: "final_answer" },
+      },
+    })
+    now = 8000
+    summary.observe({
+      type: "text-end",
+      id: "final",
+      providerMetadata: {
+        openai: { phase: "final_answer" },
+      },
+    })
+    total.close()
+    expect(summary.getDurationMs()).toBe(3000)
+    expect(total.getDurationMs()).toBe(8000)
+  })
+
+  it("uses the start time when phase arrives at text-end and leaves unknown history absent", () => {
+    let now = 1000
+    const summary = createWorkSummaryDurationTracker(() => now)
+    summary.observe({ type: "text-start", id: "unknown" })
+    summary.observe({ type: "text-end", id: "unknown" })
+    expect(summary.getDurationMs()).toBeUndefined()
+    now = 4000
+    summary.observe({ type: "text-start", id: "final" })
+    now = 9000
+    summary.observe({
+      type: "text-end",
+      id: "final",
+      providerMetadata: {
+        openai: { phase: "final_answer" },
+      },
+    })
+    expect(summary.getDurationMs()).toBe(4000)
   })
 })

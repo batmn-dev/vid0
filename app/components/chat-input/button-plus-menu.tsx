@@ -14,12 +14,12 @@ import {
 import { useFileUpload } from "@/components/ui/file-upload"
 import { Icon } from "@/components/ui/icon"
 import { Kbd } from "@/components/ui/kbd"
-import type { PromptInputActionQuery } from "@/components/ui/prompt-input"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import type { PromptInputActionQuery } from "@/components/ui/prompt-input"
 import {
   Tooltip,
   TooltipContent,
@@ -29,17 +29,17 @@ import {
 import { useBreakpoint } from "@/hooks/use-breakpoint"
 import { useIsMobileDeviceOs } from "@/hooks/use-mobile-device-os"
 import type { SearchMode } from "@/lib/models/types"
-import { RiPlugLine } from "@remixicon/react"
+import {
+  RiAddLargeLine,
+  RiAttachment2,
+  RiCameraLine,
+  RiCheckLine,
+  RiGlobalLine,
+  RiImageLine,
+  RiPlugLine,
+} from "@remixicon/react"
 import { useCallback, useMemo, useRef } from "react"
 import { type ComposerActionId } from "./composer-action-registry"
-import {
-  ComposerCameraIcon,
-  ComposerCheckIcon,
-  ComposerGlobeIcon,
-  ComposerImageSquareIcon,
-  ComposerPaperclipIcon,
-  ComposerPlusIcon,
-} from "./composer-menu-icons"
 import {
   type ComposerActionAvailability,
   type ComposerActionMenuItem,
@@ -49,9 +49,7 @@ import { composerMenuRow } from "./composer-menu-row"
 import { PopoverContentAuth } from "./popover-content-auth"
 import { useComposerActionMenu } from "./use-composer-action-menu"
 
-const composerPlusIcon = (
-  <Icon icon={ComposerPlusIcon} slotSize={20} glyphInset={0} />
-)
+const composerPlusIcon = <Icon icon={RiAddLargeLine} slotSize={20} />
 const composerPlusTooltip = (
   <TooltipShortcut label="Add files and more">
     <Kbd>@</Kbd>
@@ -67,12 +65,10 @@ const compactMenuRowClassName =
 const touchMenuChipClassName =
   "flex size-9 shrink-0 items-center justify-center rounded-full bg-(--floating-menu-touch-tertiary) text-foreground"
 const touchMenuActionIcons = {
-  "add-files": ComposerPaperclipIcon,
-  "web-search": ComposerGlobeIcon,
+  "add-files": RiAttachment2,
+  "web-search": RiGlobalLine,
 } as const
-const touchMenuCheck = (
-  <Icon icon={ComposerCheckIcon} slotSize={16} glyphInset={0} />
-)
+const touchMenuCheck = <Icon icon={RiCheckLine} slotSize={16} />
 
 type ButtonPlusMenuProps = {
   isUserAuthenticated: boolean
@@ -116,7 +112,7 @@ function NativeMobileMenuRowContent({
   label,
   touchOptimized,
 }: NativeMobileMenuRowContentProps) {
-  const glyph = <Icon icon={icon} glyphInset={0} slotSize={20} />
+  const glyph = <Icon icon={icon} slotSize={20} />
 
   return touchOptimized ? (
     <>
@@ -192,7 +188,7 @@ function NativeMobileMenuContent({
             onClick={onOpenCamera}
           >
             <NativeMobileMenuRowContent
-              icon={ComposerCameraIcon}
+              icon={RiCameraLine}
               label="Camera"
               touchOptimized
             />
@@ -205,7 +201,7 @@ function NativeMobileMenuContent({
             onClick={onOpenPhotos}
           >
             <NativeMobileMenuRowContent
-              icon={ComposerImageSquareIcon}
+              icon={RiImageLine}
               label="Photos"
               touchOptimized
             />
@@ -310,7 +306,6 @@ function ComposerActionMenuRow({
                 <span className="relative flex size-5 shrink-0 items-center justify-center">
                   <Icon
                     icon={item.action.icon}
-                    glyphInset={0}
                     iconClassName={item.action.iconClassName}
                     slotSize={20}
                   />
@@ -334,11 +329,7 @@ function ComposerActionMenuRow({
                       className="ms-auto shrink-0"
                       data-composer-action-check=""
                     >
-                      <Icon
-                        icon={ComposerCheckIcon}
-                        glyphInset={0}
-                        slotSize={16}
-                      />
+                      <Icon icon={RiCheckLine} slotSize={16} />
                     </span>
                   )}
                 </span>
@@ -555,7 +546,6 @@ export function ButtonPlusMenu({
                     <span className="relative flex size-5 shrink-0 items-center justify-center">
                       <Icon
                         icon={RiPlugLine}
-                        glyphInset={0}
                         slotSize={20}
                       />
                     </span>

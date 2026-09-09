@@ -168,6 +168,7 @@ export const generationRunWriteArgs = {
     sequence: v.number(),
     textSnapshot: v.string(),
     partsSnapshot: v.any(),
+    workSummaryDurationMs: v.optional(v.number()),
   },
   recordToolInvocations: {
     messageId: v.id("messages"),
@@ -2479,6 +2480,7 @@ export async function updateAssistantSnapshotForChat(
     sequence: number
     textSnapshot: string
     partsSnapshot: unknown
+    workSummaryDurationMs?: number
   }
 ) {
   const { run } = owner
@@ -2528,7 +2530,9 @@ export async function updateAssistantSnapshotForChat(
   // reject them because sequences advance.
   const contentUnchanged =
     message.content === args.textSnapshot &&
-    JSON.stringify(message.parts) === JSON.stringify(args.partsSnapshot)
+    JSON.stringify(message.parts) === JSON.stringify(args.partsSnapshot) &&
+    (args.workSummaryDurationMs === undefined ||
+      message.metadata?.workSummaryDurationMs === args.workSummaryDurationMs)
 
   const now = nowMs()
   if (!isTerminalMessageStatus(message.status)) {
@@ -2545,6 +2549,9 @@ export async function updateAssistantSnapshotForChat(
       await ctx.db.patch(args.messageId, {
         content: args.textSnapshot,
         parts: args.partsSnapshot,
+        ...(args.workSummaryDurationMs !== undefined ? {
+          metadata: { ...message.metadata, workSummaryDurationMs: args.workSummaryDurationMs },
+        } : {}),
         ...(workerExecuting && { status: "streaming" as const }),
         updatedAt: now,
       })

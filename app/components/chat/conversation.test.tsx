@@ -16,10 +16,7 @@ import {
 import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
-import {
-  Conversation,
-  shouldUseAssistantContentVisibility,
-} from "./conversation"
+import { Conversation } from "./conversation"
 import { PENDING_ACTIVITY_TURN_ID } from "./use-activity-panel"
 
 const HOUR = 60 * 60 * 1000
@@ -242,25 +239,8 @@ describe("Conversation recovered turn contracts", () => {
     expect(editing()).toBe(false)
   })
 
-  it("uses the exact assistant containment guard and deep-link sentinels", () => {
-    vi.stubGlobal("CSS", {
-      supports: vi.fn(
-        (declaration: string) => declaration === "content-visibility: auto"
-      ),
-    })
-
-    render()
-    const assistantTurn = container?.querySelector('[data-turn="assistant"]')
-    expect(assistantTurn?.className).toContain("[content-visibility:auto]")
-    expect(
-      shouldUseAssistantContentVisibility({
-        supported: true,
-        isUser: false,
-      })
-    ).toBe(true)
-
+  it("preserves assistant deep-link sentinels", () => {
     render("finalAgentTurnStart")
-    expect(assistantTurn?.className).not.toContain("[content-visibility:auto]")
     expect(
       container
         ?.querySelector('[data-testid="thread-scroll-edge"]')
@@ -275,12 +255,7 @@ describe("Conversation recovered turn contracts", () => {
     ).toBe("assistant-turn:user-1:assistant-1")
   })
 
-  it("keeps content-visibility off the live turn and free of :has() rules", () => {
-    vi.stubGlobal("CSS", {
-      supports: vi.fn(
-        (declaration: string) => declaration === "content-visibility: auto"
-      ),
-    })
+  it("preserves the turn wrapper and sizing rules when streaming settles", () => {
     const twoTurns = [
       { id: "user-1", role: "user", parts: [{ type: "text", text: "One" }] },
       {
@@ -319,17 +294,16 @@ describe("Conversation recovered turn contracts", () => {
         ) ?? []
       )
     expect(sections()).toHaveLength(2)
-    expect(sections()[0].className).toContain("[content-visibility:auto]")
-    expect(sections()[1].className).not.toContain("[content-visibility:auto]")
-    // The reference's :has() section rules (writing-block pointer-events,
-    // dotball content-visibility escape) are deliberately absent — they were
-    // measured as per-commit style-invalidation cost during streaming.
-    for (const section of sections()) {
-      expect(section.className).not.toContain(":has(")
-    }
+    const liveTurn = sections()[1]
+    const liveClassName = liveTurn.className
 
     renderWithStatus("ready")
-    expect(sections()[1].className).toContain("[content-visibility:auto]")
+    expect(sections()[1]).toBe(liveTurn)
+    expect(liveTurn.className).toBe(liveClassName)
+    for (const section of sections()) {
+      expect(section.className).not.toContain("content-visibility")
+      expect(section.className).not.toContain("contain-intrinsic-size")
+    }
   })
 })
 
