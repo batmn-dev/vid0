@@ -51,6 +51,20 @@ export type AssistantInlineContent = {
   commentary: ReadonlyArray<TextEvidence>
 }
 
+/**
+ * Raw tool input is already covered by toolRenderSignature, so it is dropped
+ * before serializing. A shallow map keeps JSON.stringify on its native fast
+ * path; a replacer callback costs a call per property on every render.
+ */
+function inlineRenderSignatureFor(evidence: TurnEvidence): string {
+  return JSON.stringify({
+    ...evidence,
+    timeline: evidence.timeline.map((item) =>
+      item.kind === "tool" ? { ...item, input: undefined } : item
+    ),
+  })
+}
+
 function deriveInlineContent(evidence: TurnEvidence): AssistantInlineContent {
   const commentary: TextEvidence[] = []
   let answerText = ""
@@ -246,11 +260,7 @@ export function deriveAssistantTurnView(
     orderedParts: parts ?? [],
     evidence,
     inlineContent: deriveInlineContent(evidence),
-    // Raw tool input is already covered by toolRenderSignature; skip it here
-    // so a tool's input is not serialized twice per render.
-    inlineRenderSignature: JSON.stringify(evidence, (key, value) =>
-      key === "input" ? undefined : value
-    ),
+    inlineRenderSignature: inlineRenderSignatureFor(evidence),
     text: extractTextFromMessageParts(parts),
     toolParts,
     toolRenderSignature: getToolRenderSignature(parts),

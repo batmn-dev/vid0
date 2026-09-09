@@ -335,6 +335,29 @@ function WorkEntry({
     },
     [skipMotion, activeTail]
   )
+  const statusContent =
+    !skipMotion && transitionKey ? (
+      <AnimatePresence initial={false}>
+        <WorkStatusTransition key={transitionKey} instant={isReasoningTitle}>
+          {children}
+        </WorkStatusTransition>
+      </AnimatePresence>
+    ) : (
+      children
+    )
+  // The first status row mounts during the send handoff. It keeps a plain
+  // element so no projection node, observer, or height animation competes
+  // with the optimistic paint and early typing; its key changes once history
+  // exists, so the animated row takes over on remount.
+  if (activeTail && onlyRow)
+    return (
+      <div
+        className="w-full overflow-x-visible overflow-y-clip"
+        data-inline-work-active-row
+      >
+        <div className="relative w-full">{statusContent}</div>
+      </div>
+    )
   return (
     <motion.div
       initial={
@@ -364,18 +387,7 @@ function WorkEntry({
       data-inline-work-active-row={activeTail || undefined}
     >
       <div ref={observeContent} className="relative w-full">
-        {!skipMotion && transitionKey ? (
-          <AnimatePresence initial={false}>
-            <WorkStatusTransition
-              key={transitionKey}
-              instant={isReasoningTitle}
-            >
-              {children}
-            </WorkStatusTransition>
-          </AnimatePresence>
-        ) : (
-          children
-        )}
+        {statusContent}
       </div>
     </motion.div>
   )
