@@ -144,6 +144,7 @@ import {
 } from "./word-chunking-transform"
 import {
   createWorkDurationTracker,
+  createWorkSummaryDurationTracker,
   type WorkDurationTracker,
 } from "./work-duration-tracker"
 
@@ -1065,7 +1066,13 @@ export function createChatTurnRuntime(args: {
     // metadata resolver (the four per-layer maps never escape the runtime).
     const toolMetadataByName = tool.metadata.toInvocationMetadataByName()
 
-    const enrichedSystemPrompt = effectiveSystemPrompt
+    // Custom system prompts own their communication style.
+    const enrichedSystemPrompt =
+      resolvedProvider === "openai" &&
+      hasAnyTools &&
+      effectiveSystemPrompt === SYSTEM_PROMPT_DEFAULT
+        ? `${effectiveSystemPrompt}\n\nBefore using tools, briefly explain what you will check. Give another concise progress update when findings change your next step. Keep these updates to one or two sentences, then provide the answer after the tool work.`
+        : effectiveSystemPrompt
 
     const mcpServerCount = tool.mcpServerCount
     const braintrustMetadata: BraintrustChatMetadata = {
@@ -1245,6 +1252,10 @@ export function createChatTurnRuntime(args: {
     const closeWorkDuration = () => workDuration?.close()
     const currentWorkDurationMs = () =>
       workDuration?.getDurationMs() ?? initialWorkDurationMs
+    const workSummaryDuration = createWorkSummaryDurationTracker(
+      currentWorkDurationMs
+    )
+    let emittedWorkSummaryDuration = false
     let toolMetadataByCallId: ToolInvocationMetadataByCallId = {}
 
     const reasoningActivity = createReasoningActivityTracker(
@@ -1601,7 +1612,11 @@ export function createChatTurnRuntime(args: {
           // Release time, read before the durable snapshot bookkeeping below.
           const releasedAtMs = Date.now()
           liveness.chunkReleased()
-          lifecycle.stream.onChunk(chunk)
+          workSummaryDuration.observe(chunk)
+          const snapshotWrite = lifecycle.stream.onChunk(
+            chunk,
+            workSummaryDuration.getDurationMs()
+          )
           // Liveness only — this callback sits downstream of the smoothing
           // transform, so any clock here would measure our own pacing.
           if (firstTextDeltaLatencyMs === null && chunk.type === "text-delta") {
@@ -1613,6 +1628,7 @@ export function createChatTurnRuntime(args: {
           } else if (chunk.type === "reasoning-end") {
             reasoningActivity.end(chunk.id)
           }
+          return snapshotWrite
         },
 
         onError: (err: unknown) => {
@@ -2087,6 +2103,8 @@ export function createChatTurnRuntime(args: {
       sendReasoning: true,
       sendSources: true,
       messageMetadata: ({ part }) => {
+        workSummaryDuration.observe(part)
+        const workSummaryDurationMs = workSummaryDuration.getDurationMs()
         // Every stream part passes here, post-transform and in SDK order:
         // the receipt's released-output anchors (first-write delay, wire
         // stream window) are observed at this seam, not at the HTTP tap,
@@ -2130,9 +2148,16 @@ export function createChatTurnRuntime(args: {
             toolMetadataByCallId,
             reasoningDurationMs: reasoningActivity.getDurationMs() ?? null,
             workDurationMs: currentWorkDurationMs(),
+            ...(workSummaryDurationMs !== undefined
+              ? { workSummaryDurationMs }
+              : {}),
             // Every step has ended by the time the finish part is converted.
             generationStats: timing.stats(),
           })
+        }
+        if (!emittedWorkSummaryDuration && workSummaryDurationMs !== undefined) {
+          emittedWorkSummaryDuration = true
+          return { workSummaryDurationMs }
         }
         return undefined
       },

@@ -42,7 +42,7 @@ describe("turnRowModelsEqual", () => {
     ).toBe(false)
   })
 
-  it("retains the Assistant view's streaming reasoning/source exclusion", () => {
+  it("invalidates the row when its inline reasoning changes", () => {
     const first: TurnRowModel = {
       kind: "assistant",
       id: "assistant-1",
@@ -61,7 +61,7 @@ describe("turnRowModelsEqual", () => {
       ),
     }
 
-    expect(turnRowModelsEqual(first, next)).toBe(true)
+    expect(turnRowModelsEqual(first, next)).toBe(false)
   })
 
   it("compares every assistant row fact and rejects kind changes", () => {

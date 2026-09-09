@@ -75,6 +75,7 @@ export const vToolInvocationStreamMetadata = v.object({
   reasoningDurationMs: v.optional(v.number()),
   // Optional while production may contain rows written before work timing.
   workDurationMs: v.optional(v.number()),
+  workSummaryDurationMs: v.optional(v.number()),
   // Applied per-turn reasoning effort (ADR-0026); shared vocabulary mirror.
   reasoningEffort: v.optional(vReasoningEffort),
   // Applied total generation allowance (ADR-0028), including reasoning.
@@ -205,10 +206,11 @@ export function projectPersistedMessageMetadata(
     "reasoningDurationMs",
     optionalDurationMs(raw.reasoningDurationMs)
   )
+  setIfDefined(result, "workDurationMs", optionalDurationMs(raw.workDurationMs))
   setIfDefined(
     result,
-    "workDurationMs",
-    optionalDurationMs(raw.workDurationMs)
+    "workSummaryDurationMs",
+    optionalDurationMs(raw.workSummaryDurationMs)
   )
   setIfDefined(
     result,

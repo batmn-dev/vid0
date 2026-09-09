@@ -10,6 +10,15 @@ import {
   toDurableUiMessage,
 } from "./durable-turn-runtime"
 
+const startedTextStreams = new WeakSet<object>()
+function emitTextChunk(stream: { onChunk: (chunk: TextStreamPart<ToolSet>) => unknown }, text: string) {
+  if (!startedTextStreams.has(stream)) {
+    startedTextStreams.add(stream)
+    stream.onChunk({ type: "text-start", id: "text-1" })
+  }
+  return stream.onChunk({ type: "text-delta", id: "text-1", text })
+}
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -163,14 +172,14 @@ describe("durable turn runtime internals", () => {
     const persist = vi.fn().mockResolvedValue(undefined)
     const tracker = createDurableSnapshotTracker({ persist })
 
-    tracker.onChunk({ type: "text-delta", text: "A" } as never)
+    emitTextChunk(tracker, "A")
     await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(persist).toHaveBeenCalledTimes(1)
     expect(persist).toHaveBeenCalledWith({
       sequence: 1,
       textSnapshot: "A",
-      partsSnapshot: [{ type: "text", text: "A" }],
+      partsSnapshot: [{ type: "text", text: "A", state: "streaming" }],
     })
   })
 
@@ -185,6 +194,50 @@ describe("durable turn runtime internals", () => {
     expect(tracker.partsSnapshot).toEqual([])
   })
 
+  it("checkpoints ordered commentary, tool results, and final text with phase metadata", async () => {
+    const persist = vi.fn().mockResolvedValue(undefined)
+    const tracker = createDurableSnapshotTracker({ persist, throttleMs: 60_000 })
+    const chunks: TextStreamPart<ToolSet>[] = [
+      { type: "text-start", id: "c", providerMetadata: { openai: { phase: "commentary" } } },
+      { type: "text-delta", id: "c", text: "Looking up. " },
+      { type: "text-end", id: "c" },
+      { type: "tool-call", toolCallId: "s", toolName: "search", input: { query: "news" } },
+      { type: "tool-result", toolCallId: "s", toolName: "search", input: { query: "news" }, output: { found: true } },
+      { type: "text-start", id: "f", providerMetadata: { openai: { phase: "final_answer" } } },
+      { type: "text-delta", id: "f", text: "The answer." },
+    ]
+    for (const chunk of chunks) await tracker.onChunk(chunk)
+    // Abort may flush before text-end. The partial answer must survive too.
+    await Promise.all([tracker.flush(), tracker.flush()])
+    expect(persist.mock.lastCall?.[0]).toMatchObject({
+      textSnapshot: "Looking up. The answer.",
+      partsSnapshot: [
+        { type: "text", text: "Looking up. ", state: "done", providerMetadata: { openai: { phase: "commentary" } } },
+        { type: "tool-search", toolCallId: "s", state: "output-available", input: { query: "news" }, output: { found: true } },
+        { type: "text", text: "The answer.", state: "streaming", providerMetadata: { openai: { phase: "final_answer" } } },
+      ],
+    })
+  })
+
+  it("retains the approved assistant baseline when a continuation checkpoints its result", async () => {
+    const persist = vi.fn().mockResolvedValue(undefined)
+    const commentary = { type: "text" as const, text: "I can do that.", state: "done" as const,
+      providerMetadata: { openai: { phase: "commentary" } } }
+    const tracker = createDurableSnapshotTracker({ persist, initialMessage: {
+      id: "assistant", role: "assistant", parts: [commentary, {
+        type: "tool-edit", toolCallId: "edit", state: "approval-responded",
+        input: { name: "draft" }, approval: { id: "approval", approved: true },
+      }],
+    } })
+    await tracker.onChunk({ type: "tool-result", toolCallId: "edit", toolName: "edit",
+      input: { name: "draft" }, output: { saved: true } })
+    await tracker.flush()
+    expect(persist.mock.lastCall?.[0]).toMatchObject({
+      textSnapshot: commentary.text,
+      partsSnapshot: [commentary, { type: "tool-edit", state: "output-available", output: { saved: true } }],
+    })
+  })
+
   it("waits for an in-flight snapshot write before flushing the final snapshot", async () => {
     const firstWrite = createDeferred<void>()
     const persist = vi
@@ -197,22 +250,22 @@ describe("durable turn runtime internals", () => {
       throttleMs: 60_000,
     })
 
-    tracker.onChunk({ type: "text-delta", text: "A" } as never)
-    tracker.onChunk({ type: "text-delta", text: "B" } as never)
+    emitTextChunk(tracker, "A")
+    emitTextChunk(tracker, "B")
 
     let flushed = false
     const flushPromise = tracker.flush().then(() => {
       flushed = true
     })
 
-    await Promise.resolve()
+    await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(flushed).toBe(false)
     expect(persist).toHaveBeenCalledTimes(1)
     expect(persist.mock.calls[0]?.[0]).toMatchObject({
       sequence: 1,
       textSnapshot: "A",
-      partsSnapshot: [{ type: "text", text: "A" }],
+      partsSnapshot: [{ type: "text", text: "A", state: "streaming" }],
     })
 
     firstWrite.resolve()
@@ -222,7 +275,7 @@ describe("durable turn runtime internals", () => {
     expect(persist.mock.calls[1]?.[0]).toMatchObject({
       sequence: 2,
       textSnapshot: "AB",
-      partsSnapshot: [{ type: "text", text: "AB" }],
+      partsSnapshot: [{ type: "text", text: "AB", state: "streaming" }],
     })
   })
 
@@ -233,7 +286,7 @@ describe("durable turn runtime internals", () => {
       throttleMs: 60_000,
     })
 
-    tracker.onChunk({ type: "text-delta", text: "A" } as never)
+    emitTextChunk(tracker, "A")
     await new Promise<void>((resolve) => setImmediate(resolve))
 
     const finalParts = [
@@ -278,8 +331,8 @@ describe("durable turn runtime internals", () => {
     })
 
     // First chunk starts an in-flight write both flushes must contend with.
-    tracker.onChunk({ type: "text-delta", text: "A" } as never)
-    tracker.onChunk({ type: "text-delta", text: "B" } as never)
+    emitTextChunk(tracker, "A")
+    emitTextChunk(tracker, "B")
 
     const flushes = Promise.all([tracker.flush(), tracker.flush()])
     const outcomePromise = Promise.race([
@@ -306,7 +359,7 @@ describe("durable turn runtime internals", () => {
     try {
       const tracker = createDurableSnapshotTracker({ persist })
 
-      tracker.onChunk({ type: "text-delta", text: "A" } as never)
+      emitTextChunk(tracker, "A")
 
       const flushPromise = tracker.flush()
       const flushExpectation = expect(flushPromise).rejects.toThrow(
@@ -322,7 +375,7 @@ describe("durable turn runtime internals", () => {
       expect(persist.mock.calls[1]?.[0]).toMatchObject({
         sequence: 2,
         textSnapshot: "A",
-        partsSnapshot: [{ type: "text", text: "A" }],
+        partsSnapshot: [{ type: "text", text: "A", state: "streaming" }],
       })
     } finally {
       vi.useRealTimers()
@@ -341,10 +394,7 @@ describe("durable turn runtime internals", () => {
     try {
       const tracker = createDurableSnapshotTracker({ persist })
 
-      tracker.onChunk({
-        type: "text-delta",
-        text: "A",
-      } as TextStreamPart<ToolSet>)
+      emitTextChunk(tracker, "A")
 
       await new Promise<void>((resolve) => setImmediate(resolve))
     } finally {

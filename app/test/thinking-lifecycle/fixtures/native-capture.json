@@ -1,0 +1,43 @@
+{
+  "source": "reference2-trace.json",
+  "durationMs": 14000,
+  "events": [
+    {
+      "atMs": 1032,
+      "text": "",
+      "search": false,
+      "count": 0
+    },
+    {
+      "atMs": 5819,
+      "text": "I\u2019m scanning today\u2019s venture/",
+      "search": false,
+      "count": 0
+    },
+    {
+      "atMs": 6089,
+      "text": "I\u2019m scanning today\u2019s venture/AI/design news with a bias toward things that could actually change how a founder-des",
+      "search": false,
+      "count": 0
+    },
+    {
+      "atMs": 6207,
+      "text": "I\u2019m scanning today\u2019s venture/AI/design news with a bias toward things that could actually change how a founder-designer builds, positions, or raises\u2014not just generic funding headlines.",
+      "search": false,
+      "count": 0
+    },
+    {
+      "atMs": 8469,
+      "text": "I\u2019m scanning today\u2019s venture/AI/design news with a bias toward things that could actually change how a founder-designer builds, positions, or raises\u2014not just generic funding headlines.",
+      "search": true,
+      "count": 0
+    },
+    {
+      "atMs": 9060,
+      "text": "I\u2019m scanning today\u2019s venture/AI/design news with a bias toward things that could actually change how a founder-designer builds, positions, or raises\u2014not just generic funding headlines.",
+      "search": true,
+      "count": 10
+    }
+  ],
+  "finalAtMs": 17700
+}

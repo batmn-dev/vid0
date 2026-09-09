@@ -627,6 +627,7 @@
   --text-primary: var(--foreground);
   --text-secondary: oklch(0.478 0 0);
   --text-tertiary: oklch(0.65 0 0);
+  --inline-work-source-surface: #f4f4f4;
   --text-placeholder: var(--text-tertiary);
   --text-quaternary: rgba(0, 0, 0, 0.188);
   --text-disabled: oklch(0.65 0 0);
@@ -834,6 +835,7 @@
   --text-primary: var(--foreground);
   --text-secondary: oklch(0.848 0 0);
   --text-tertiary: oklch(0.754 0 0);
+  --inline-work-source-surface: #303030;
   --text-placeholder: var(--text-tertiary);
   --text-quaternary: rgba(255, 255, 255, 0.412);
   --text-disabled: oklch(1 0 0 / 0.412);
@@ -2630,4 +2632,26 @@ code {
 }
 .dark .composer-format-preserved-selection {
   color: white;
+}
+
+.markdown.inline-work-narrative,
+.markdown.inline-work-narrative p {
+  line-height: 1.5rem;
+}
+.markdown.inline-work-narrative > :last-child {
+  margin-bottom: 0;
+}
+
+.inline-work-disclosure-body {
+  opacity: 1;
+  transition: opacity 300ms ease-in-out;
+}
+.inline-work-disclosure:is([data-starting-style], [data-ending-style]) > .inline-work-disclosure-body {
+  opacity: 0;
+}
+@starting-style {
+  .inline-work-disclosure-body { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .inline-work-disclosure-body { transition: none; }
 }

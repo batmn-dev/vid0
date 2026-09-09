@@ -86,8 +86,7 @@ function attachmentsEqual(
 /**
  * Content equality for the facts rendered by one Chat turn row. Conversation
  * derives fresh models because AI SDK parts can mutate in place; this function
- * is therefore the row's memo contract and deliberately preserves the
- * Assistant turn view's reasoning/source exclusions.
+ * is therefore the row's memo contract, including inline work evidence.
  */
 export function turnRowModelsEqual(
   previous: TurnRowModel,

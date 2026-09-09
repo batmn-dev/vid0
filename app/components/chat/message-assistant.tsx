@@ -4,7 +4,6 @@ import { MessageActions, MessageContent } from "@/components/ui/message"
 import { SystemMessage } from "@/components/ui/system-message"
 import { TooltipMultiline } from "@/components/ui/tooltip"
 import { useBreakpoint } from "@/hooks/use-breakpoint"
-import { deriveAssistantActivityPresentation } from "@/lib/chat-messages/assistant-activity"
 import {
   deriveAssistantTurnPhase,
   hasPreservedResponseContent,
@@ -31,7 +30,7 @@ import {
   useDefaultReasoningDurationMs,
   useIsActivityPanelTurnOpen,
 } from "./activity/activity-panel-store"
-import { AssistantActivityIndicator } from "./assistant-activity-indicator"
+import { AssistantInlineWork } from "./assistant-inline-work"
 import { GenerationStatsLine } from "./generation-stats"
 import { MessageActionButton } from "./message-action-button"
 import { QuoteButton } from "./quote-button"
@@ -83,8 +82,10 @@ export function MessageAssistant({
   const retryModelName =
     getModelInfo(retryModelId ?? "")?.name ?? retryModelId ?? "selected model"
 
-  const contentNullOrEmpty = children === null || children === ""
+  const answerText = view.text === "" ? children : view.inlineContent.answerText
+  const contentNullOrEmpty = answerText === ""
   const hasContent = !contentNullOrEmpty
+  const hasCopyableText = (view.text || children) !== ""
   // Durable terminal-state presentation inputs: whether any visible response
   // content survived, and the persisted error summary for failed turns.
   const preservedResponse = hasPreservedResponseContent(view)
@@ -93,10 +94,8 @@ export function MessageAssistant({
   const showGenerationStats =
     useUserPreferences().preferences.showGenerationStats
 
-  // Reasoning + sources live in the Chat-owned Activity panel. Each assistant
-  // row with activity keeps its own trigger; only the row currently projected
-  // into the panel reports aria-expanded=true. The row reaches the panel
-  // through the activity panel store seam — no props thread through the tree.
+  // Inline work owns disclosure. Sources and actionable tool details retain
+  // their existing navigation through the Chat-owned Activity panel.
   const panelActions = useActivityPanelActions()
   const panelId = useActivityPanelId()
   const isPanelTurnOpen = useIsActivityPanelTurnOpen(
@@ -118,15 +117,6 @@ export function MessageAssistant({
     status: status ?? "ready",
     isLast: isLast ?? false,
   })
-  const activityPresentation = deriveAssistantActivityPresentation(
-    view,
-    phase,
-    {
-      workDurationMs: currentSessionDurationMs,
-      reasoningDurationMs: currentSessionReasoningDurationMs,
-      status: status ?? "ready",
-    }
-  )
   const turnActive = phase.kind !== "settled"
   const showMessageBody =
     searchImageResults.length > 0 ||
@@ -135,11 +125,7 @@ export function MessageAssistant({
     status === "awaiting_approval" ||
     status === "aborted" ||
     status === "failed"
-  const isBareThinkingStatus =
-    activityPresentation.kind === "live-status" &&
-    activityPresentation.semanticKind === "thinking"
-  const showInlineBusyPlaceholder = isBareThinkingStatus && !showMessageBody
-  const showMessageSlot = showMessageBody || showInlineBusyPlaceholder
+  const showMessageSlot = showMessageBody
 
   const { selectionInfo, clearSelection, messageRef } =
     useAssistantMessageSelection(true)
@@ -149,8 +135,7 @@ export function MessageAssistant({
     Boolean(isLast) &&
     finishReason !== undefined &&
     !turnActive &&
-    showMessageSlot &&
-    !showInlineBusyPlaceholder
+    showMessageSlot
   const completedMessageNodeRef = useRef<HTMLDivElement | null>(null)
   const completedMessageRef = useCallback(
     (message: HTMLDivElement | null) => {
@@ -176,17 +161,9 @@ export function MessageAssistant({
       clearSelection()
     }
   }, [selectionInfo, onQuote, clearSelection])
-  const handleActivityTriggerOpenChange = useCallback(
-    (open: boolean) => {
-      if (!panelActions) return
-      if (open) {
-        panelActions.openTurn(messageId)
-      } else {
-        panelActions.close()
-      }
-    },
-    [panelActions, messageId]
-  )
+  const handleActivityOpen = useCallback(() => {
+    panelActions?.openTurn(messageId)
+  }, [panelActions, messageId])
   // The sources badge is a navigate-to affordance, not a disclosure: it always
   // opens/projects this turn with the Sources section in view (re-clicking
   // while open re-scrolls to sources rather than closing — closing stays on
@@ -200,7 +177,7 @@ export function MessageAssistant({
     status !== "submitted" &&
     status !== "streaming" &&
     status !== "awaiting_approval"
-  const showFooterActions = hasContent && copyableStatus
+  const showFooterActions = hasCopyableText && copyableStatus
   // Generation stats (ADR-0030) are stamped for every turn the provider ran,
   // text or not, so the line mounts the footer on its own; the text actions
   // (copy, regenerate) stay gated on text. Gate on the derived view, not the
@@ -215,23 +192,23 @@ export function MessageAssistant({
 
   return (
     <>
-      {/* Captured turn anatomy (box-chain verified 2026-07-14 and 2026-08-21):
-          inspectable activity and the `text-message` block are gap-4 siblings.
-          A bare Thinking placeholder instead occupies that same message slot,
-          so first content replaces it without a vertical handoff. The action
-          row mounts only after the response settles; message parts flow in a
-          gap-1 column. */}
+      {/* Work stays in the response flow and collapses above the final answer.
+          Response actions mount only after generation settles. */}
       <div className={cn("flex max-w-full grow flex-col gap-4", className)}>
-        {isBareThinkingStatus ? null : (
-          <AssistantActivityIndicator
-            presentation={activityPresentation}
-            open={isPanelTurnOpen}
-            onOpenChange={
-              panelActions ? handleActivityTriggerOpenChange : undefined
-            }
-            controlsId={panelId}
-          />
-        )}
+        <AssistantInlineWork
+          view={view}
+          phase={phase}
+          status={status ?? "ready"}
+          workDurationMs={currentSessionDurationMs}
+          reasoningDurationMs={currentSessionReasoningDurationMs}
+          isReplaying={isReplaying}
+          activityOpen={isPanelTurnOpen}
+          activityControlsId={panelId}
+          onActivityOpenChange={(nextOpen) =>
+            nextOpen ? handleActivityOpen() : panelActions?.close()
+          }
+          onOpenActivity={panelActions ? handleActivityOpen : undefined}
+        />
 
         {showMessageSlot ? (
           <div
@@ -241,20 +218,11 @@ export function MessageAssistant({
             data-message-id={messageId}
             data-message-author-role="assistant"
             data-perf-text-length={children.length}
-            data-turn-start-message={
-              isLast && !showInlineBusyPlaceholder ? "true" : undefined
-            }
+            data-turn-start-message={isLast ? "true" : undefined}
             dir="auto"
-            tabIndex={isLast && !showInlineBusyPlaceholder ? 0 : undefined}
+            tabIndex={isLast ? 0 : undefined}
           >
             <div className="flex w-full flex-col gap-1 empty:hidden">
-              {showInlineBusyPlaceholder ? (
-                <AssistantActivityIndicator
-                  presentation={activityPresentation}
-                  open={false}
-                />
-              ) : null}
-
               {searchImageResults.length > 0 && (
                 <SearchImages results={searchImageResults} />
               )}
@@ -273,7 +241,7 @@ export function MessageAssistant({
                   streaming={status === "submitted" || status === "streaming"}
                   animateStreaming={!isReplaying}
                 >
-                  {children}
+                  {answerText}
                 </MessageContent>
               )}
 
@@ -432,12 +400,7 @@ export function MessageAssistant({
                 ) : null}
               </>
             ) : null}
-            {/* Trailing sources badge (reference: last child of the
-                    response-actions row). Settled turns only — while the turn
-                    is live, source deltas stay panel-owned and this row's memo
-                    deliberately ignores them; the settle re-render (status
-                    flip / metadata adoption) is what reveals the badge with
-                    the final deduped sources. */}
+            {/* Sources retain their dedicated panel navigation after settlement. */}
             {!turnActive && panelActions && (
               <SourcesBadge
                 sources={view.sources}

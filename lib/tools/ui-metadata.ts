@@ -39,6 +39,8 @@ export type ToolInvocationStreamMetadata = {
    * request preparation, persistence, analytics, and resource cleanup.
    */
   workDurationMs?: number
+  /** Observed work before the provider's explicit final-answer boundary. */
+  workSummaryDurationMs?: number
   /** Generation stats (ADR-0030), stamped at finish from SDK step performance. */
   generationStats?: GenerationStats
   toolMetadataByName?: ToolInvocationMetadataByName
@@ -90,6 +92,7 @@ export function buildFinishToolInvocationStreamMetadata(options: {
   toolMetadataByCallId: ToolInvocationMetadataByCallId
   reasoningDurationMs: number | null
   workDurationMs: number
+  workSummaryDurationMs?: number
   generationStats?: GenerationStats
 }): ToolInvocationStreamMetadata {
   const metadata: ToolInvocationStreamMetadata = {}
@@ -100,6 +103,9 @@ export function buildFinishToolInvocationStreamMetadata(options: {
     metadata.reasoningDurationMs = options.reasoningDurationMs
   }
   metadata.workDurationMs = options.workDurationMs
+  if (options.workSummaryDurationMs !== undefined) {
+    metadata.workSummaryDurationMs = options.workSummaryDurationMs
+  }
   if (options.generationStats) {
     metadata.generationStats = options.generationStats
   }

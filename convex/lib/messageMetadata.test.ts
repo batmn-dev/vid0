@@ -26,6 +26,7 @@ describe("projectPersistedMessageMetadata", () => {
     const result = projectPersistedMessageMetadata({
       reasoningDurationMs: 1200,
       workDurationMs: 5200,
+      workSummaryDurationMs: 3100,
       generationBudget: 16_384,
       generationStats: {
         timeToFirstTokenMs: 420.5,
@@ -42,6 +43,7 @@ describe("projectPersistedMessageMetadata", () => {
     expect(result).toEqual({
       reasoningDurationMs: 1200,
       workDurationMs: 5200,
+      workSummaryDurationMs: 3100,
       generationBudget: 16_384,
       generationStats: {
         timeToFirstTokenMs: 420.5,
@@ -67,6 +69,7 @@ describe("projectPersistedMessageMetadata", () => {
       projectPersistedMessageMetadata({
         reasoningDurationMs: -1,
         workDurationMs: Number.NaN,
+        workSummaryDurationMs: Number.POSITIVE_INFINITY,
         toolMetadataByName: { web_search: display },
       })
     ).toEqual({ toolMetadataByName: { web_search: display } })

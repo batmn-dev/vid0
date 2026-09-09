@@ -15,7 +15,12 @@ A refreshed browser starts an authenticated reconnect before its Convex WebSocke
 
 The refreshed document restores the selected saved messages immediately, without clearing the assistant's parts. The retained stream reconstructs the SDK state silently from its immutable starting state; the caught-up fence publishes the restored answer once, then live chunks publish at their arrival cadence. Historical output has no pacing or typewriter animation. A subscription checkpoint already displayed, or a transient reconnect's visible prefix, is never replaced with a shorter prefix. Replay does not execute client tools, auto-submit approvals, or call initiating-turn finish handlers.
 
-Checkpoint adoption compares visible content in the representation the checkpoint preserves. Live Convex checkpoints aggregate reasoning and text and omit SDK step boundaries; those checkpoints require cumulative reasoning and text prefixes independently. Invisible `step-start` parts do not participate in comparison. Checkpoints containing structured parts retain ordered per-part guards for text, tools, data, sources and files. Rewriting checkpoint persistence to retain full SDK structure is unnecessary for this handoff.
+Checkpoint adoption compares visible content in the representation the checkpoint preserves. Legacy Convex checkpoints aggregate reasoning and text and omit SDK step boundaries; those checkpoints require cumulative reasoning and text prefixes independently. Invisible `step-start` parts do not participate in comparison. Checkpoints containing structured parts retain ordered per-part guards for text, tools, data, sources and files. ADR-0040 extends new checkpoints to preserve SDK structure and text phase for inline work history; legacy aggregate checkpoints remain readable.
+
+Text and reasoning adoption guards compare text prefixes, with explicit text phase
+preserved. Opaque provider metadata is allowed to change: OpenAI can replace null
+encrypted reasoning metadata at completion without changing visible content.
+Requiring that metadata to remain identical would block otherwise valid replay.
 
 An ephemeral exact assistant identity bypasses Markdown decay during reconstruction. It never enters message metadata or persistence. Incremental parsing and the existing live-stream paint treatment remain in place.
 
@@ -85,6 +90,22 @@ on corrected deployment `5ed93b1f` passed: two live reloads preserved the sample
 prefix and resumed granular updates before completion. The completed rendered
 answer matched exactly after another reload. A focused SDK receiver test covers
 same-document transport interruption and prefix-preserving retry separately.
+
+### Local refresh correction (2026-09-08)
+
+The localhost regression had two causes: Redis was not running, so refresh used
+roughly 750 ms checkpoint batches; and the new structured-checkpoint guard could
+reject valid replay when opaque provider metadata changed. The guard now preserves
+visible text and explicit phase without requiring opaque metadata equality.
+The local Redis service was restored and registered to start at login.
+
+Authenticated Chrome full-document reloads on GPT-5.6 Luna/Low preserved every
+sampled text prefix: 5,678 characters restored as 6,000 at 985 ms, and a second
+reload restored 13,662 as 13,882 at 604 ms. Both continued with granular updates.
+The final 14,851-character answer matched exactly after another reload. Continuous
+60 fps recordings and timestamped DOM data are retained under
+`output/thinking-ui-parity-20260908/hard-refresh/`. This verifies the local flow;
+it is not a new production or provider-matrix acceptance claim.
 
 ## References
 

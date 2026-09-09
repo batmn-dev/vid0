@@ -1,4 +1,5 @@
 import { api } from "@/convex/_generated/api"
+import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import { getAllModels } from "@/lib/models"
 import * as retainedChatStream from "@/lib/chat-stream/server"
 import {
@@ -348,6 +349,71 @@ beforeEach(() => {
 })
 
 describe("createChatTurnRuntime — prepare()", () => {
+  it.each([
+    {
+      provider: "openai",
+      hasTools: true,
+      systemPrompt: undefined,
+      enriched: true,
+    },
+    {
+      provider: "openai",
+      hasTools: true,
+      systemPrompt: SYSTEM_PROMPT_DEFAULT,
+      enriched: true,
+    },
+    {
+      provider: "openai",
+      hasTools: true,
+      systemPrompt: "Respond without progress updates.",
+      enriched: false,
+    },
+    {
+      provider: "openai",
+      hasTools: false,
+      systemPrompt: undefined,
+      enriched: false,
+    },
+    {
+      provider: "anthropic",
+      hasTools: true,
+      systemPrompt: undefined,
+      enriched: false,
+    },
+  ] as const)(
+    "requests real progress only for default OpenAI tool turns ($provider, tools=$hasTools, enriched=$enriched)",
+    async ({ provider, hasTools, systemPrompt, enriched }) => {
+      vi.mocked(getAllModels).mockResolvedValue([
+        { id: "test-model", provider, tools: hasTools },
+      ] as unknown as Awaited<ReturnType<typeof getAllModels>>)
+      vi.mocked(prepareToolRuntime).mockResolvedValue(
+        makeToolRuntime({ hasTools }) as unknown as Awaited<
+          ReturnType<typeof prepareToolRuntime>
+        >
+      )
+      const input = makeInput({ systemPrompt })
+      input.credential.provider = provider
+      input.route.providerId = provider
+      const harness = makeStreamHarness()
+      const runtime = createChatTurnRuntime({
+        input,
+        deps: makeDeps(harness, makeFetchMutation()),
+      })
+      await runtime.prepare()
+      await runtime.toResponse(notAbortedSignal())
+
+      const instructions = harness.captured.streamOpts.instructions
+      if (enriched) {
+        expect(instructions).toContain(SYSTEM_PROMPT_DEFAULT)
+        expect(instructions).toContain(
+          "Before using tools, briefly explain what you will check."
+        )
+      } else {
+        expect(instructions).toBe(systemPrompt ?? SYSTEM_PROMPT_DEFAULT)
+      }
+    }
+  )
+
   it("throws a 401 MISSING_API_KEY when neither a BYOK nor an env key exists", async () => {
     const harness = makeStreamHarness()
     const fetchMutation = makeFetchMutation()
@@ -1612,6 +1678,32 @@ describe("createChatTurnRuntime — durable completion handoff", () => {
 })
 
 describe("createChatTurnRuntime — reasoning lifecycle timing", () => {
+  it("emits pre-answer duration at the explicit final boundary and preserves total work", async () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(0)
+    try {
+      const harness = makeStreamHarness()
+      const runtime = createChatTurnRuntime({
+        input: makeInput({ isAuthenticated: false, convexToken: undefined }),
+        deps: makeDeps(harness, makeFetchMutation()),
+      })
+      await runtime.prepare()
+      await runtime.toResponse(notAbortedSignal())
+      dateNow.mockReturnValue(1200)
+      const part = { type: "text-start", id: "answer", providerMetadata: {
+        openai: { phase: "final_answer" },
+      } }
+      await harness.captured.streamOpts.onChunk({ chunk: part })
+      expect(harness.captured.responseOpts.messageMetadata({ part })).toEqual({
+        workSummaryDurationMs: 1200,
+      })
+      dateNow.mockReturnValue(3000)
+      expect(harness.captured.responseOpts.messageMetadata({ part: { type: "finish" } }))
+        .toMatchObject({ workSummaryDurationMs: 1200, workDurationMs: 3000 })
+    } finally {
+      dateNow.mockRestore()
+    }
+  })
+
   it("persists the union of explicit reasoning intervals and ignores deltas as starts", async () => {
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(0)
     try {

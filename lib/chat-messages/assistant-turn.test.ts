@@ -360,7 +360,11 @@ describe("deriveAssistantActivityModel chronology", () => {
             state: "output-available",
             input: {},
             output: {
-              action: { type: "findInPage", url: "https://apnews.com/", pattern: "Latest" },
+              action: {
+                type: "findInPage",
+                url: "https://apnews.com/",
+                pattern: "Latest",
+              },
             },
           },
         ],
@@ -562,7 +566,7 @@ describe("assistantTurnViewsEqual memo contract", () => {
       "streaming"
     )
 
-  it("treats reasoning text deltas and source additions as equal (panel-owned; row must not churn)", () => {
+  it("detects reasoning and source updates rendered by inline work", () => {
     const a = base()
     const b = deriveAssistantTurnView(
       {
@@ -579,7 +583,7 @@ describe("assistantTurnViewsEqual memo contract", () => {
       },
       "streaming"
     )
-    expect(assistantTurnViewsEqual(a, b)).toBe(true)
+    expect(assistantTurnViewsEqual(a, b)).toBe(false)
   })
 
   it("differs on a reasoning phase transition", () => {
@@ -646,8 +650,14 @@ describe("closed activity entry algebra (compile-time)", () => {
     ]
     const model: AssistantActivityModel = {
       entries: [
-        // @ts-expect-error the completion row lives on the model, not in entries
-        { id: "completion", kind: "completion", title: "t", detail: "Done", status: "complete" },
+        {
+          id: "completion",
+          // @ts-expect-error the completion row lives on the model, not in entries
+          kind: "completion",
+          title: "t",
+          detail: "Done",
+          status: "complete",
+        },
       ],
       sourceResults: [],
       imageResults: [],
@@ -788,23 +798,21 @@ describe("deriveAssistantTurnPhase", () => {
       ]),
       liveCtx
     )
-    expect(denied.kind).toBe("responding")
+    expect(denied.kind).toBe("thinking")
   })
 
-  it("is responding once the turn has substance and nothing is in flight", () => {
+  it("responds only after answer text, remaining thinking between completed work steps", () => {
     expect(
       deriveAssistantTurnPhase(viewOf([{ type: "text", text: "Hi" }]), liveCtx)
         .kind
     ).toBe("responding")
-    // Opaque reasoning finished, first token not yet arrived — the trigger
-    // must settle to "Thought", not bounce back to the generating shimmer.
+    // A finished summary does not imply an answer has started.
     expect(
       deriveAssistantTurnPhase(
         viewOf([{ type: "reasoning", text: "", state: "done" }]),
         liveCtx
       ).kind
-    ).toBe("responding")
-    // A completed tool card is substance too.
+    ).toBe("thinking")
     expect(
       deriveAssistantTurnPhase(
         viewOf([
@@ -818,7 +826,7 @@ describe("deriveAssistantTurnPhase", () => {
         ]),
         liveCtx
       ).kind
-    ).toBe("responding")
+    ).toBe("thinking")
   })
 
   it("is submitted pre-stream", () => {
@@ -1326,7 +1334,6 @@ describe("deriveAssistantActivityPresentation", () => {
       },
     })
   })
-
 
   it("keeps completion present while the answer is responding", () => {
     const view = viewOf([

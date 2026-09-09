@@ -107,6 +107,12 @@ export function getServerMessageId(metadata: unknown): string | undefined {
   return readServerMessageId(metadata)
 }
 
+/** Resolved provider is stamped at stream start and retained by replay. */
+export function getMessageProvider(metadata: unknown): string | undefined {
+  if (!isRecord(metadata)) return undefined
+  return typeof metadata.provider === "string" ? metadata.provider : undefined
+}
+
 /** Stream metadata is partial; keep the checkpoint's identity and branch fields. */
 export function mergeStreamMetadata(
   previous: unknown,
@@ -186,6 +192,17 @@ export function getGenerationStats(
 export function getWorkDurationMs(metadata: unknown): number | undefined {
   if (!isRecord(metadata)) return undefined
   const value = metadata.workDurationMs
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined
+}
+
+/** Read the work duration frozen when the final answer begins. */
+export function getWorkSummaryDurationMs(
+  metadata: unknown
+): number | undefined {
+  if (!isRecord(metadata)) return undefined
+  const value = metadata.workSummaryDurationMs
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : undefined
@@ -378,6 +395,7 @@ export function adoptServerOwned(
   const persistedStreamKeys = [
     "reasoningDurationMs",
     "workDurationMs",
+    "workSummaryDurationMs",
     "reasoningEffort",
     "generationBudget",
     "generationStats",
