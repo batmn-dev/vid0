@@ -60,9 +60,22 @@ describe("inline work projection", () => {
       status: "streaming",
       isLast: true,
     })
+    expect(deriveAssistantInlineWork(view, phase).items).toMatchObject([
+      { kind: "activity-link", id: "reasoning-0", title: "Reasoning" },
+      { kind: "commentary" },
+      { kind: "search" },
+    ])
+    // Reasoning-only turns keep the existing panel trigger, not a history row.
+    const reasoningOnly = deriveAssistantTurnView(
+      { parts: [reasoning], metadata: { provider: "openai" } },
+      "ready"
+    )
     expect(
-      deriveAssistantInlineWork(view, phase).items.map((item) => item.kind)
-    ).toEqual(["commentary", "search"])
+      deriveAssistantInlineWork(
+        reasoningOnly,
+        deriveAssistantTurnPhase(reasoningOnly, { status: "ready", isLast: true })
+      ).items
+    ).toEqual([])
     expect(view.evidence.timeline[0]).toMatchObject({ text: reasoning.text })
     expect(deriveAssistantActivityModel(view, phase)?.entries[0]).toMatchObject(
       {

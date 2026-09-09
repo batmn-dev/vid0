@@ -3,7 +3,8 @@ import nextConfig from "eslint-config-next"
 const eslintConfig = [
   ...nextConfig,
   {
-    ignores: ["convex/_generated/**", ".next-perf/**"],
+    // output/ holds local QA captures (see .gitignore); their bundles OOM ESLint.
+    ignores: ["convex/_generated/**", ".next-perf/**", "output/**"],
   },
   {
     // Icon system enforcement: use Remix Icons React components for UI icons.

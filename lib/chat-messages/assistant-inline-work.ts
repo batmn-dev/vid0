@@ -20,6 +20,8 @@ export type InlineWorkItem =
       compactTitle?: string
     }
   | { kind: "status"; id: string; title: string }
+  /** Opens the Activity panel for raw reasoning kept out of inline prose. */
+  | { kind: "activity-link"; id: string; title: string }
   | Exclude<AssistantActivityTimelineEntry, { kind: "reasoning" }>
 
 export type InlineWorkActiveTail = {
@@ -97,11 +99,16 @@ export function deriveAssistantInlineWork(
       activityIndex++
     }
     if (evidence.kind === "reasoning") {
-      // OpenAI progress is commentary; raw summaries remain in Activity.
-      if (
-        getMessageProvider(view.metadata) !== "openai" &&
-        evidence.text.trim()
-      ) {
+      // OpenAI progress is commentary; raw summaries remain in Activity, so a
+      // settled summary keeps one inline row that reaches the panel.
+      if (getMessageProvider(view.metadata) === "openai") {
+        if (entries.length > 0 && !evidence.isStreamingPart)
+          items.push({
+            kind: "activity-link",
+            id: `reasoning-${evidence.partIndex}`,
+            title: "Reasoning",
+          })
+      } else if (evidence.text.trim()) {
         // A standalone heading can replace the last search's live summary.
         // Its body streams independently of the provider's leading heading.
         const heading = evidence.text.trim().match(/^\*\*([^*\n]+)\*\*$/)?.[1]
@@ -145,6 +152,8 @@ export function deriveAssistantInlineWork(
         })
     )
   }
+  // Reasoning-only turns keep the existing panel trigger instead of a history.
+  if (items.every((item) => item.kind === "activity-link")) items.length = 0
   const live =
     phase.kind !== "settled" &&
     (!hasFinalAnswer ||
@@ -175,6 +184,7 @@ export function deriveAssistantInlineWork(
         item.kind !== "commentary" &&
         item.kind !== "reasoning" &&
         item.kind !== "status" &&
+        item.kind !== "activity-link" &&
         (item.status === "running" || item.status === "approval")
     )
     const active = displayItems[activeIndex]

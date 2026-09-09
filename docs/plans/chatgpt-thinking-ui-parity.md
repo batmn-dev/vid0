@@ -29,7 +29,7 @@ Add an inline work renderer consuming normalized presentation. Preserve the exis
 
 Implementation agent owns production projection/UI files and essential adjacent tests. Root owns this plan, ADR/context synchronization, lifecycle fixture, and browser evidence. Comparison agent initially owns video audit artifacts; it will receive production ownership only after implementation handoff.
 
-Alternative considered: restyle the existing side-panel trigger. Rejected because it cannot represent the observed chronological inline work and automatic pre-answer collapse. No dependency or provider-execution policy change is planned.
+Alternative considered: restyle the existing side-panel trigger. Rejected because it cannot represent the observed chronological inline work and automatic pre-answer collapse. No new dependency is planned (Motion is already installed). The only provider-execution change is the ADR-0040 prompt addition: default-prompt OpenAI tool turns request concise pre-tool progress and updates when findings change the next step; custom system prompts remain authoritative.
 
 ### Reload findings and bounded backend follow-through
 

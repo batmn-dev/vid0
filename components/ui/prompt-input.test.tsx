@@ -274,6 +274,28 @@ describe("PromptInput responsive expansion", () => {
     )
   })
 
+  it("re-evaluates the multiline latch when the draft identity changes", () => {
+    const link = `[Short](https://example.com/${"x".repeat(2100)})`
+    const render = (value: string, draftKey: string) =>
+      act(() => {
+        root.render(
+          <PromptInput value={value} draftKey={draftKey} onValueChange={() => {}}>
+            <PromptInputActions data-composer-leading="true" />
+            <PromptInputTextarea aria-label="Ask anything" />
+            <PromptInputActions data-composer-trailing="true" />
+          </PromptInput>
+        )
+      })
+    const expanded = () =>
+      container.querySelector("form")?.hasAttribute("data-expanded")
+    render(`${link} ${"visible text ".repeat(10)}`, "chat:a")
+    expect(expanded()).toBe(true)
+    render(link, "chat:a")
+    expect(expanded()).toBe(true)
+    render(link, "chat:b")
+    expect(expanded()).toBe(false)
+  })
+
   it("disconnects geometry observation with the textarea DOM lifecycle", () => {
     act(() => {
       root.render(

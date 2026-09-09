@@ -71,7 +71,10 @@ do not restart projection. The reference spring uses `bounce: 0.1` and
 `duration: 0.3`; paste suppresses layout motion for 250ms on every route.
 The controls anchor is a plain zero-height grid row. The editor stays mounted,
 and reduced-motion preferences disable layout motion. The measurement clone
-stays under the editor's parent to retain scoped wrapping and typography.
+mounts in one hidden, strictly contained host on `document.body` that repeats
+the editor's scoped typography and wrapping classes. Inserting it under the
+composer re-ran the scroll root's and thread bottom's `:has()` invalidation on
+every keystroke while a stream kept the document dirty (PR #185 benchmark).
 Expand/Collapse keeps `aria-pressed` for accessibility without selected styling;
 only an open menu or an actual pointer press receives the shared pressed fill.
 

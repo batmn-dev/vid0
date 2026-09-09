@@ -69,6 +69,7 @@ type PromptInputContextType = {
   setTextareaExpanded: React.Dispatch<React.SetStateAction<boolean>>
   setCanExpandComposer: React.Dispatch<React.SetStateAction<boolean>>
   layoutDependency: string
+  draftKey: string | undefined
   maxHeight?: number | string
   onSubmit?: () => void
   disabled?: boolean
@@ -94,6 +95,12 @@ type PromptInputProps = {
   entities?: readonly PromptInputEntity[]
   onEntitiesChange?: (entities: readonly PromptInputEntity[]) => void
   expanded?: boolean
+  /**
+   * Identity of the controlled draft. The multiline latch survives edits
+   * within one draft; a new key re-evaluates it for that draft's value so a
+   * persistent composer does not inherit the previous chat's layout.
+   */
+  draftKey?: string
   maxHeight?: number | string
   onSubmit?: () => void
   disabled?: boolean
@@ -106,6 +113,7 @@ function PromptInput({
   className,
   isLoading = false,
   expanded = false,
+  draftKey,
   maxHeight,
   value,
   onValueChange,
@@ -177,6 +185,7 @@ function PromptInput({
         setTextareaExpanded,
         setCanExpandComposer,
         layoutDependency,
+        draftKey,
         maxHeight,
         onSubmit,
         disabled,
@@ -315,22 +324,17 @@ function readPixels(value: string) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function getCompactEditorWidth(
-  textarea: HTMLTextAreaElement,
-  fullWidth = false
-) {
+/** Both measurement widths from one pass of layout reads per keystroke. */
+function getEditorWidths(textarea: HTMLTextAreaElement) {
   const surface = textarea.closest<HTMLElement>(
     '[data-composer-surface="true"]'
   )
-  if (!surface) {
-    return textarea.getBoundingClientRect().width
-  }
-
-  const layout = surface.querySelector<HTMLElement>(
+  const layout = surface?.querySelector<HTMLElement>(
     '[data-composer-layout="true"]'
   )
-  if (!layout) {
-    return textarea.getBoundingClientRect().width
+  if (!surface || !layout) {
+    const width = textarea.getBoundingClientRect().width
+    return { compact: width, full: width }
   }
 
   const layoutStyle = getComputedStyle(layout)
@@ -342,7 +346,7 @@ function getCompactEditorWidth(
     readPixels(layoutStyle.paddingRight)
   // Measure without the expand control's gutter so showing it cannot feed
   // back into the threshold. The multiline wrapper has 10px on both sides.
-  if (fullWidth) return Math.max(0, contentWidth - 20)
+  const full = Math.max(0, contentWidth - 20)
   const editorPadding =
     readPixels(
       layoutStyle.getPropertyValue("--composer-compact-editor-padding-start")
@@ -352,7 +356,7 @@ function getCompactEditorWidth(
     )
 
   if (window.matchMedia("(max-width: 639px)").matches) {
-    return Math.max(0, contentWidth - editorPadding)
+    return { compact: Math.max(0, contentWidth - editorPadding), full }
   }
 
   const leadingWidth =
@@ -364,10 +368,56 @@ function getCompactEditorWidth(
       .querySelector<HTMLElement>('[data-composer-trailing="true"]')
       ?.getBoundingClientRect().width ?? 0
 
-  return Math.max(
-    0,
-    contentWidth - leadingWidth - trailingWidth - editorPadding
-  )
+  return {
+    compact: Math.max(
+      0,
+      contentWidth - leadingWidth - trailingWidth - editorPadding
+    ),
+    full,
+  }
+}
+
+/**
+ * Measurement clones mount in one hidden, strictly contained host on
+ * `document.body`, never inside the composer. The composer's ancestors (scroll
+ * root, thread bottom) carry `:has()` rules, so a clone inserted there re-ran
+ * their style invalidation on every keystroke while a stream kept the
+ * document dirty. The host repeats the editor's scoped typography and wrapping
+ * classes so the clone still measures like the live editor.
+ */
+const measureHosts = new Map<"composer" | "edit", HTMLElement>()
+
+function getMeasureHost(editor: HTMLElement) {
+  const key = editor.closest(".user-message-edit-input") ? "edit" : "composer"
+  const cached = measureHosts.get(key)
+  if (cached?.isConnected) return cached
+  const host = document.createElement("div")
+  host.setAttribute("aria-hidden", "true")
+  host.setAttribute("data-composer-measure-host", key)
+  Object.assign(host.style, {
+    position: "absolute",
+    top: "0",
+    left: "0",
+    width: "0",
+    height: "0",
+    overflow: "hidden",
+    visibility: "hidden",
+    pointerEvents: "none",
+    contain: "strict",
+  })
+  const scope = document.createElement("div")
+  scope.className = "wcDTda_prosemirror-parent default-browser"
+  if (key === "edit") {
+    const edit = document.createElement("div")
+    edit.className = "user-message-edit-input"
+    edit.appendChild(scope)
+    host.appendChild(edit)
+  } else {
+    host.appendChild(scope)
+  }
+  document.body.appendChild(host)
+  measureHosts.set(key, scope)
+  return scope
 }
 
 function measureTextareaScrollHeight(
@@ -394,8 +444,7 @@ function measureTextareaScrollHeight(
       margin: "0",
       padding: "0 0 16px",
     })
-    // Preserve the live editor's scoped wrapping and typography rules.
-    editor.parentElement?.appendChild(clone)
+    getMeasureHost(editor).appendChild(clone)
     const height = clone.scrollHeight
     clone.remove()
     return height
@@ -503,6 +552,7 @@ const PromptInputTextarea = React.forwardRef<
     setTextareaExpanded,
     setCanExpandComposer,
     layoutDependency,
+    draftKey,
     maxHeight,
     onSubmit,
     disabled,
@@ -578,6 +628,7 @@ const PromptInputTextarea = React.forwardRef<
     value,
   ])
 
+  const appliedDraftKeyRef = React.useRef(draftKey)
   const measuredLayout = React.useRef<{
     textarea: HTMLTextAreaElement
     doc: EditorState["doc"]
@@ -590,7 +641,11 @@ const PromptInputTextarea = React.forwardRef<
     fullHeight: number
   } | null>(null)
   const applyEditorLayout = React.useCallback(
-    (textarea: HTMLTextAreaElement | null, nextValue: string) => {
+    (
+      textarea: HTMLTextAreaElement | null,
+      nextValue: string,
+      options?: { freshDraft?: boolean }
+    ) => {
       if (disableAutosize || !textarea) {
         setTextareaExpanded(false)
         setCanExpandComposer(false)
@@ -612,8 +667,8 @@ const PromptInputTextarea = React.forwardRef<
         return
       }
 
-      const compactWidth = getCompactEditorWidth(textarea)
-      const fullWidth = getCompactEditorWidth(textarea, true)
+      const { compact: compactWidth, full: fullWidth } =
+        getEditorWidths(textarea)
       const doc = viewRef.current.state.doc
       const previous = measuredLayout.current
       const style = textarea.style.cssText
@@ -687,8 +742,11 @@ const PromptInputTextarea = React.forwardRef<
       // React's "Maximum update depth exceeded" guard. The live term was also
       // redundant — the expanded textarea is never narrower than the compact
       // one, so any value that wraps live wraps in the compact measurement.
-      // Like the reference, multiline layout stays latched until the draft clears.
-      setTextareaExpanded((current) => current || shouldExpand)
+      // Like the reference, multiline layout stays latched until the draft
+      // clears. A new draft identity starts without the previous draft's latch.
+      setTextareaExpanded(
+        (current) => (options?.freshDraft ? false : current) || shouldExpand
+      )
       setCanExpandComposer(
         fullHeight >
           4 * readPixels(computed.lineHeight) +
@@ -917,10 +975,13 @@ const PromptInputTextarea = React.forwardRef<
     if (fallbackTextareaRef.current) {
       fallbackTextareaRef.current.value = value
     }
-    applyEditorLayout(fallbackTextareaRef.current, value)
+    const freshDraft = appliedDraftKeyRef.current !== draftKey
+    appliedDraftKeyRef.current = draftKey
+    applyEditorLayout(fallbackTextareaRef.current, value, { freshDraft })
     paintControllerRef.current?.onComposerUpdate()
   }, [
     applyEditorLayout,
+    draftKey,
     id,
     ariaLabel,
     className,

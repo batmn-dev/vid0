@@ -78,7 +78,7 @@ databases for deployment environments. Place Redis near the Vercel function regi
 On macOS with Homebrew, use `brew services start redis` to keep the local service
 running across logins, then confirm `redis-cli ping` returns `PONG`. `bun run dev`
 starts Next.js and Convex only. A successful page load does not verify Redis.
-If the service exits, inspect `/opt/homebrew/var/log/redis.log`; missing optional
+If the service exits, inspect `$(brew --prefix)/var/log/redis.log`; missing optional
 module files in `redis.conf` can prevent startup. Core Redis Streams need no modules.
 After restoring Redis, start a new response: output generated while Redis was down
 has checkpoints but no retained token log to recover.

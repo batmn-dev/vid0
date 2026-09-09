@@ -246,7 +246,11 @@ export function deriveAssistantTurnView(
     orderedParts: parts ?? [],
     evidence,
     inlineContent: deriveInlineContent(evidence),
-    inlineRenderSignature: JSON.stringify(evidence),
+    // Raw tool input is already covered by toolRenderSignature; skip it here
+    // so a tool's input is not serialized twice per render.
+    inlineRenderSignature: JSON.stringify(evidence, (key, value) =>
+      key === "input" ? undefined : value
+    ),
     text: extractTextFromMessageParts(parts),
     toolParts,
     toolRenderSignature: getToolRenderSignature(parts),
