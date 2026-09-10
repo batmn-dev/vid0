@@ -5,6 +5,14 @@ Author: research agent. Consumer: a separate implementation agent plus an
 independent QA subagent. This document is self-contained; it does not depend on
 the research conversation.
 
+> **Status: implemented 2026-09-09; historical.** The decision record is
+> `docs/adr/0041-provider-reasoning-boundary.md` and the outcome is Section 12.
+> Sections 2 through 7 describe the pre-implementation state and the plan as
+> written before the work; where Section 12 records a different outcome
+> (Mistral `mistral-medium-3-5` and Perplexity `sonar-reasoning-pro` keep
+> `reasoningText: false`), Section 12 and the ADR are the contract. Do not
+> re-apply these steps.
+
 ## 1. Objective, scope, acceptance criteria
 
 ### Objective
@@ -137,8 +145,8 @@ carried on parts.
 | Google (`@ai-sdk/google` 4.0.49, generateContent) | gemini-3.1-pro-preview, gemini-3.5-flash, gemini-3.1-flash-lite | `thinkingConfig.includeThoughts: true` + `thinkingLevel` on override | Thought summaries stream as `reasoning-*`; adapter splits text/thought transitions into separate parts | none | Yes: thought and text parts interleave inside one candidate | `thoughtSignature` rides `providerMetadata.google` on text/reasoning/tool parts; Gemini 3 tool replay without one gets the `skip_thought_signature_validator` sentinel | `google_search` tool part plus grounding sources | app-derived |
 | Google 2.5 | gemini-2.5-pro, gemini-2.5-flash (`reasoningText:true`, no `effortLevels`) | includeThoughts only | summaries | none | yes | thoughtSignature | as above | app-derived |
 | xAI Responses (`@ai-sdk/xai` 4.0.42, `provider.responses(id)`) | grok-4.3 (visible), grok-4-0709 and others hidden | `reasoningEffort` only on override (grok-4.3 only) | Adapter emits `reasoning-*` from `response.reasoning_summary_text.delta` and `response.reasoning_text.delta`; docs show summaries for grok-4.6, grok-4.3 exposure unverified (Q5) | none (adapter has no `phase`) | per step | `itemId`; `reasoningEncryptedContent` only when `store:false` (not sent) | `web_search_call`/`x_search_call` items become tool parts; citations become sources | app-derived |
-| Mistral (`@ai-sdk/mistral` 4.0.31) | mistral-medium-3-5, mistral-small-2603 (`reasoningText:true`) | **nothing** (request shaping has no Mistral case) | Docs: reasoning is off unless `reasoning_effort:"high"`; adapter emits `reasoning-*` from `thinking` chunks. SDK gate accepts ids `mistral-small-2603`, `mistral-medium-3.5` (dot), not `mistral-medium-3-5` (catalog id) | none | n/a | none | no native search (Exa layer) | app-derived |
-| Perplexity (`@ai-sdk/perplexity` 4.0.30) | sonar, sonar-reasoning-pro (visible); sonar-pro, sonar-deep-research hidden | none | **`sonar-reasoning-pro` emits a literal `<think>…</think>` section inside content; the adapter has no parser** | none | n/a | none | `citations` become `source` parts (no tool part) | app-derived |
+| Mistral (`@ai-sdk/mistral` 4.0.31) | mistral-medium-3-5, mistral-small-2603 (`reasoningText:true`) | **nothing** at research time (request shaping had no Mistral case); now `reasoningEffort: "high"` whenever `reasoningText` is true, and `mistral-medium-3-5` is flagged `reasoningText: false` (Section 12, Q2) | Docs: reasoning is off unless `reasoning_effort:"high"`; adapter emits `reasoning-*` from `thinking` chunks. SDK gate accepts ids `mistral-small-2603`, `mistral-medium-3.5` (dot), not `mistral-medium-3-5` (catalog id) | none | n/a | none | no native search (Exa layer) | app-derived |
+| Perplexity (`@ai-sdk/perplexity` 4.0.30) | sonar, sonar-reasoning-pro (visible); sonar-pro, sonar-deep-research hidden | none | **`sonar-reasoning-pro` is documented to emit a literal `<think>…</think>` section inside content; the adapter has no parser.** Live streaming showed no tags and no reasoning (default `stream_mode: "full"` suppresses them); the route keeps `reasoningText: false` and declares `inlineReasoningTags: "think"` as the documented-behavior guard (Section 12, R4) | none | n/a | none | `citations` become `source` parts (no tool part) | app-derived |
 | OpenRouter (`@openrouter/ai-sdk-provider` 3.0.0, chat completions) | 95 routes | Construction-time `.chat(id, {reasoning: {effort}})` from catalog or override | `reasoning_details` (`reasoning.text`/`summary`/`encrypted`) and legacy `reasoning` string become one `reasoning-*` block per step; **reasoning arriving after content in the same step is accumulated but never emitted** | none | Only before text in each step | `reasoning_details` (with `signature`) attached on `reasoning-end`; unsigned details are dropped on replay by the provider | Web plugin: `url_citation` annotations become sources; **no tool part** (implied-search item) | app-derived |
 
 Model-specific differences that matter (do not generalize across a provider):
@@ -464,6 +472,10 @@ Files: `lib/openproviders/request-shaping.ts` (+test), possibly
   should migrate through `model-id-migration.ts` (ADR-0025 succession), or (b)
   set `reasoningText: false` on that route with a dated comment. Do not guess.
 
+Outcome (Section 12, Q2): the `mistral` request-shaping case exists and sends
+`reasoningEffort: "high"`; option (b) was applied to `mistral-medium-3-5`.
+Nothing here remains to implement.
+
 ### Step 3. Perplexity think-tag transform (R4, C6)
 
 Files: new `app/api/chat/inline-reasoning-tag-transform.ts` (+ `.test.ts`),
@@ -477,6 +489,11 @@ before `wordChunkingTransform`/`lifecycleTransform` at ~1423-1434).
   presentation treats it as a visible-reasoning route.
 - Tests: split tags across deltas, tag at chunk boundary, unterminated tag at
   finish, no tags (identity), abort mid-tag.
+
+Outcome (Section 12, R4): the transform shipped as written, but
+`sonar-reasoning-pro` keeps `reasoningText: false` because the API's default
+streaming mode suppresses reasoning events; only `inlineReasoningTags: "think"`
+was set. Do not flip `reasoningText` on that route from this step.
 
 ### Step 4. Provider-neutral work-summary freeze (R5, C5)
 
