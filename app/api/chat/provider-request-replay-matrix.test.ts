@@ -602,6 +602,65 @@ describe("hosted replay final provider-request matrix", () => {
     expect(bodyJson).toContain("The prior visible answer is 42.")
     expect(bodyJson).toContain(CURRENT_IMAGE_URL)
   })
+
+  it("replays OpenAI text phase on assistant message items without item ids (ADR-0041)", async () => {
+    const history = [
+      {
+        id: "user-1",
+        role: "user",
+        parts: [{ type: "text", text: "Find the answer" }],
+      },
+      {
+        id: "assistant-1",
+        role: "assistant",
+        metadata: { provider: "openai" },
+        parts: [
+          { type: "step-start" },
+          {
+            type: "text",
+            text: "Let me look that up.",
+            state: "done",
+            providerMetadata: {
+              openai: { itemId: "msg_commentary_id", phase: "commentary" },
+            },
+          },
+          {
+            type: "text",
+            text: "The answer is 42.",
+            state: "done",
+            providerMetadata: {
+              openai: { itemId: "msg_final_id", phase: "final_answer" },
+            },
+          },
+        ],
+      },
+      {
+        id: "current-user",
+        role: "user",
+        parts: [{ type: "text", text: "Thanks, and why?" }],
+      },
+    ] as unknown as UIMessage[]
+
+    const result = await captureRequest({
+      origin: "openai",
+      target: "openai",
+      searchEnabled: false,
+      history,
+    })
+    const body = result.body as {
+      input: Array<{ role?: string; phase?: string; id?: string; type?: string }>
+    }
+    const assistantItems = body.input.filter((item) => item.role === "assistant")
+    expect(assistantItems.map((item) => item.phase)).toEqual([
+      "commentary",
+      "final_answer",
+    ])
+    expect(assistantItems.every((item) => item.id === undefined)).toBe(true)
+    const bodyJson = JSON.stringify(result.body)
+    expect(bodyJson).not.toContain("item_reference")
+    expect(bodyJson).not.toContain("msg_commentary_id")
+    expect(bodyJson).not.toContain("msg_final_id")
+  })
 })
 
 function approvalTail(options: {

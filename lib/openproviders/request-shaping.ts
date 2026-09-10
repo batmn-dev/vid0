@@ -119,9 +119,14 @@ function resolveProviderOptions(
         // Effort rides only the adaptive path, and the catalog never offers
         // "none" on Anthropic — so the Opus 5 "disabled thinking + xhigh/max
         // → 400" combination is unrepresentable here by construction.
+        // `display` is explicit because the provider default flipped at 4.7
+        // (Opus 4.8/Sonnet 5/Fable 5 default to `omitted`: thinking blocks
+        // stream with empty text and no thinking_delta). `summarized` is the
+        // documented default on 4.6, so it is a no-op there. The fixed-budget
+        // path below never sends it (`display` is invalid with `enabled`).
         return {
           anthropic: {
-            thinking: { type: "adaptive" },
+            thinking: { type: "adaptive", display: "summarized" },
             ...(effort !== undefined ? { effort } : {}),
           },
         }
@@ -158,6 +163,11 @@ function resolveProviderOptions(
       // models reason unconditionally and reject the parameter), so effort
       // is undefined for them and the option is never sent.
       return effort !== undefined ? { xai: { reasoningEffort: effort } } : {}
+    case "mistral":
+      // Mistral reasoning is off unless reasoning_effort is "high" (the only
+      // enabling value the installed adapter sends); there is no per-turn
+      // effort knob, so the catalog flag alone decides.
+      return { mistral: { reasoningEffort: "high" } }
     // OpenRouter reasoning remains construction-time provider state in its V4
     // provider API; the catalog setting (and the per-turn effort override)
     // is mapped in provider-strategy.ts at model construction.

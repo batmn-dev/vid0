@@ -1704,6 +1704,66 @@ describe("createChatTurnRuntime — reasoning lifecycle timing", () => {
     }
   })
 
+  it("keeps the tool-order pre-answer duration when the stream aborts after answer onset (Stop)", async () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(0)
+    try {
+      const harness = makeStreamHarness()
+      vi.mocked(toUIMessageStream).mockImplementation((opts: any) => {
+        if (opts.messageMetadata) harness.captured.responseOpts = opts
+        // Drain the durable snapshot tracker's reduction input so its chunk
+        // writes never backpressure; this test asserts the abort flush.
+        void opts.stream?.pipeTo(new WritableStream()).catch(() => {})
+        return new ReadableStream({
+          start(controller) {
+            controller.close()
+          },
+        })
+      })
+      const wire = makeWorkerWire()
+      const runtime = createChatTurnRuntime({
+        input: makeInput(),
+        deps: makeDeps(harness, makeFetchMutation(), { durableWorkerWire: wire }),
+      })
+      await runtime.prepare()
+      await runtime.toResponse(notAbortedSignal())
+
+      dateNow.mockReturnValue(1000)
+      harness.captured.streamOpts.onChunk({
+        chunk: { type: "tool-call", toolCallId: "c1", toolName: "web_search", input: {} },
+      })
+      dateNow.mockReturnValue(4400)
+      harness.captured.streamOpts.onChunk({
+        chunk: { type: "text-start", id: "answer" },
+      })
+      harness.captured.streamOpts.onChunk({
+        chunk: { type: "text-delta", id: "answer", text: "As of today" },
+      })
+      // Unpublished while streaming: a later tool call could still arrive.
+      expect(
+        harness.captured.responseOpts.messageMetadata({
+          part: { type: "text-delta", id: "answer", text: "x" },
+        })
+      ).toBeUndefined()
+
+      // Stop: no finish chunk ever comes. The onAbort flush is the last
+      // snapshot the terminal run accepts, so the value must ride it.
+      dateNow.mockReturnValue(9000)
+      await harness.captured.streamOpts.onAbort({ steps: [] })
+
+      const snapshots = wire.calls.filter(
+        (call) => call.op === "updateAssistantSnapshot"
+      )
+      expect(snapshots.at(-1)?.args).toMatchObject({
+        workSummaryDurationMs: 4400,
+      })
+      expect(wireCall(wire, "markGenerationRunAborted")?.args).toMatchObject({
+        workDurationMs: 9000,
+      })
+    } finally {
+      dateNow.mockRestore()
+    }
+  })
+
   it("persists the union of explicit reasoning intervals and ignores deltas as starts", async () => {
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(0)
     try {

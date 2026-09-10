@@ -1,3 +1,4 @@
+import { readTextPhase } from "@/lib/chat-messages/turn-evidence"
 import type { UIMessage } from "ai"
 import {
   defineHistoryAdapter,
@@ -162,34 +163,52 @@ function validateOpenAIBlock(block: MessagePart[]): BlockValidationResult {
 // history part so replay always sends real content and never provider-linked
 // ids. The live continuation tail never passes through this adapter, so
 // approval-protocol metadata is unaffected.
+//
+// The one exception (ADR-0041, C7): a text part keeps its `phase`
+// (`commentary` | `final_answer`). OpenAI documents that follow-up requests
+// should preserve and resend `phase` on assistant messages; the adapter maps
+// it back onto the replayed message item, and it carries no server-linked
+// id. Reasoning parts stay fully stripped.
 function stripProviderMetadataFromPart(part: MessagePart): {
   part: MessagePart
   removedMetadataFields: Array<"callProviderMetadata" | "providerMetadata">
 } {
   const record = part as PartWithToolFields & {
-    providerMetadata?: Record<string, unknown>
+    providerMetadata?: Record<string, Record<string, unknown> | undefined>
   }
   const hadCallProviderMetadata = record.callProviderMetadata != null
-  const hadProviderMetadata = record.providerMetadata != null
+  const phase = part.type === "text" ? readTextPhase(record) : undefined
+  const keptMetadata =
+    phase !== undefined ? { openai: { phase } } : undefined
+  const hadStrippableProviderMetadata =
+    record.providerMetadata != null &&
+    (phase === undefined ||
+      Object.keys(record.providerMetadata).length > 1 ||
+      Object.keys(record.providerMetadata.openai ?? {}).length > 1)
   const removedMetadataFields: Array<
     "callProviderMetadata" | "providerMetadata"
   > = []
   if (hadCallProviderMetadata) {
     removedMetadataFields.push("callProviderMetadata")
   }
-  if (hadProviderMetadata) {
+  if (hadStrippableProviderMetadata) {
     removedMetadataFields.push("providerMetadata")
   }
-  if (!hadCallProviderMetadata && !hadProviderMetadata) {
+  if (!hadCallProviderMetadata && !hadStrippableProviderMetadata) {
     return { part, removedMetadataFields }
   }
 
   const stripped = stripCallProviderMetadata(record) as MessagePart & {
     providerMetadata?: Record<string, unknown>
   }
-  if (hadProviderMetadata) {
+  if (hadStrippableProviderMetadata) {
     const { providerMetadata: _providerMetadata, ...rest } = stripped
-    return { part: rest as MessagePart, removedMetadataFields }
+    return {
+      part: (keptMetadata
+        ? { ...rest, providerMetadata: keptMetadata }
+        : rest) as MessagePart,
+      removedMetadataFields,
+    }
   }
 
   return {

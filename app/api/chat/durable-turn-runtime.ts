@@ -321,7 +321,10 @@ export type DurableStreamBinding = {
     recordTitleUsageEvidence(
       evidence: TitleTerminalUsageEvidence
     ): Promise<boolean>
-    onChunk(chunk: TextStreamPart<ToolSet>, workSummaryDurationMs?: number): Promise<void> | void
+    onChunk(
+      chunk: TextStreamPart<ToolSet>,
+      workSummary?: WorkSummarySnapshot
+    ): Promise<void> | void
     recordStep(step: DurableStepRecord): void
     noteStreamError(
       failure: DurableFailure,
@@ -338,7 +341,9 @@ export type DurableStreamBinding = {
       reason: string,
       workDurationMs: number,
       facts?: TerminalUsageFacts,
-      timingReceipt?: RunTimingReceipt
+      timingReceipt?: RunTimingReceipt,
+      /** Pre-answer duration resolved at abort; rides the flush below. */
+      workSummaryDurationMs?: number
     ): Promise<void>
     /** Stream-onEnd half of the finish handoff (sync capture). */
     captureFinish(facts: StreamFinishFacts): void
@@ -639,6 +644,16 @@ export type SnapshotPersistArgs = {
   textSnapshot: string
   partsSnapshot: unknown
   workSummaryDurationMs?: number
+  /** Tentative tool-order onset; null clears one an earlier checkpoint sent. */
+  workSummaryCandidateMs?: number | null
+}
+
+/** The work-summary tracker's view at a chunk (ADR-0041, C5). */
+export type WorkSummarySnapshot = {
+  /** Resolved pre-answer duration (rule 1, or rule 2 at stream end). */
+  durationMs?: number
+  /** Rule 2's tentative onset while the stream is still open. */
+  candidateMs?: number
 }
 
 type DurableSnapshotTrackerOptions = {
@@ -658,6 +673,21 @@ export function createDurableSnapshotTracker(
   let text = ""
   let parts: UIMessage["parts"] = []
   let workSummaryDurationMs: number | undefined
+  let workSummaryCandidateMs: number | undefined
+  // Once a candidate has been sent, every later checkpoint states it
+  // explicitly (number or null) so a clear reaches the message doc.
+  let candidateNoted = false
+  const workSummaryArgs = () => ({
+    ...(workSummaryDurationMs !== undefined ? { workSummaryDurationMs } : {}),
+    ...(candidateNoted
+      ? {
+          workSummaryCandidateMs:
+            workSummaryDurationMs === undefined
+              ? (workSummaryCandidateMs ?? null)
+              : null,
+        }
+      : {}),
+  })
   let sequence = 0
   let lastWriteAt = 0
   let writeInFlight: Promise<unknown> | null = null
@@ -691,7 +721,7 @@ export function createDurableSnapshotTracker(
           sequence: currentSequence,
           textSnapshot: text,
           partsSnapshot: getParts(),
-          ...(workSummaryDurationMs !== undefined ? { workSummaryDurationMs } : {}),
+          ...workSummaryArgs(),
         }),
         "writing assistant snapshot"
       )
@@ -729,7 +759,7 @@ export function createDurableSnapshotTracker(
       parts = message.parts
       text = extractTextFromMessageParts(parts)
       // Start chunks alone must not replace a useful durable checkpoint.
-      if (workSummaryDurationMs === undefined && !parts.some((part) =>
+      if (workSummaryDurationMs === undefined && !candidateNoted && !parts.some((part) =>
         part.type === "text" || part.type === "reasoning"
           ? part.text.length > 0
           : part.type !== "step-start"
@@ -743,9 +773,25 @@ export function createDurableSnapshotTracker(
   })
   let writes = Promise.resolve()
   let closing: Promise<void> | undefined
-  const onChunk = (chunk: TextStreamPart<ToolSet>, summaryDurationMs?: number) => {
+  // The pre-answer duration and its candidate are metadata, not content:
+  // recording a change advances the content version so the next checkpoint
+  // (or a forced flush after a server-side abort) writes it even when text
+  // and parts are unchanged, and so a cleared candidate reaches the doc.
+  const noteWorkSummary = (summary: WorkSummarySnapshot | undefined) => {
+    if (!summary) return
+    if (summary.durationMs !== undefined && summary.durationMs !== workSummaryDurationMs) {
+      workSummaryDurationMs = summary.durationMs
+      contentVersion++
+    }
+    if (summary.candidateMs !== workSummaryCandidateMs) {
+      workSummaryCandidateMs = summary.candidateMs
+      if (summary.candidateMs !== undefined) candidateNoted = true
+      if (candidateNoted) contentVersion++
+    }
+  }
+  const onChunk = (chunk: TextStreamPart<ToolSet>, workSummary?: WorkSummarySnapshot) => {
+    noteWorkSummary(workSummary)
     if (closing) return Promise.resolve()
-    if (summaryDurationMs !== undefined) workSummaryDurationMs = summaryDurationMs
     writes = writes.then(() => withWorkerWriteTimeout(
       writer.write(chunk), "reducing assistant snapshot chunk"
     )).catch((error: unknown) => {
@@ -794,7 +840,7 @@ export function createDurableSnapshotTracker(
         sequence: currentSequence,
         textSnapshot: finalText,
         partsSnapshot: finalParts,
-        ...(workSummaryDurationMs !== undefined ? { workSummaryDurationMs } : {}),
+        ...workSummaryArgs(),
       }),
       "writing assistant snapshot"
     )
@@ -802,6 +848,7 @@ export function createDurableSnapshotTracker(
 
   return {
     onChunk,
+    noteWorkSummary,
     flush: async () => {
       await drain()
       await persist(true)
@@ -1879,7 +1926,14 @@ export function createConvexDurableTurn(args: {
             })
           },
 
-          async onAbort(reason, workDurationMs, facts, timingReceipt) {
+          async onAbort(
+            reason,
+            workDurationMs,
+            facts,
+            timingReceipt,
+            workSummaryDurationMs
+          ) {
+            tracker.noteWorkSummary({ durationMs: workSummaryDurationMs })
             await drainPendingWrites(stepWritePromises)
             await tracker.flush().catch(() => {})
             if (facts) lastTerminalFacts = facts

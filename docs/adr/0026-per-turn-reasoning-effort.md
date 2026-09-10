@@ -153,6 +153,10 @@ capability gating separate.
   cannot send, or the applied receipt would overstate what ran.
 - Clamping means a receipt can differ from the request; the message badge and
   `generationRuns` keep both honest.
+- Anthropic adaptive requests also carry `thinking.display: "summarized"`
+  (ADR-0041): Opus 4.8/Sonnet 5/Fable 5 default to `omitted`, which would
+  make every effort level stream empty thinking blocks. The fixed-budget
+  path never sends `display`.
 - Later work (not in scope): syncing the per-model map to `userPreferences`,
   a "try again with more thinking" regenerate item, and platform-funded
   effort with effort-scaled reservations.

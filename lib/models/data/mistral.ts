@@ -23,7 +23,12 @@ const mistralModels: ModelConfig[] = [
     vision: true,
     tools: true,
     audio: false,
-    reasoningText: true,
+    // 2026-09-09: the installed @ai-sdk/mistral 4.0.31 only forwards
+    // reasoning_effort for ids `mistral-small-latest`, `mistral-small-2603`,
+    // `mistral-medium-3`, `mistral-medium-3.5` — not this catalog id — so
+    // this route can never receive reasoning parts on this SDK. Flip back to
+    // true once the adapter's id gate accepts the id (ADR-0041, R3).
+    reasoningText: false,
     openSource: true,
     speed: "Medium",
     intelligence: "High",

@@ -4589,6 +4589,29 @@ describe("stopGenerationRun", () => {
     expect(fixture.chat.liveRunFreshUntil).toBeUndefined()
   })
 
+  it("promotes the checkpointed tool-order candidate into the pre-answer duration on Stop", async () => {
+    // The client's Stop mutation is the run's terminal; the worker can write
+    // nothing afterwards. The part order is complete, so the candidate the
+    // last checkpoint carried is the value (ADR-0041, C5).
+    vi.spyOn(Date, "now").mockReturnValue(NOW)
+    const fixture = makeStoppableFixture()
+    fixture.message.metadata = { reasoningDurationMs: 436, workSummaryCandidateMs: 4400 }
+    const { ctx } = createMutationCtx(fixture.tables)
+
+    await stopGenerationRunForChat(ctx, {
+      user: fixture.user,
+      chat: fixture.chat,
+      run: fixture.run,
+    })
+
+    expect(fixture.message.status).toBe("aborted")
+    expect(fixture.message.metadata).toEqual({
+      reasoningDurationMs: 436,
+      workSummaryDurationMs: 4400,
+      workDurationMs: 6000,
+    })
+  })
+
   it("is idempotent: the second Stop returns the canonical terminal result", async () => {
     vi.spyOn(Date, "now").mockReturnValue(NOW)
     const fixture = makeStoppableFixture()
@@ -4681,6 +4704,35 @@ describe("updateAssistantSnapshotForChat", () => {
       workSummaryDurationMs: 1200,
       workDurationMs: 2500,
     })
+  })
+
+  it("stores the tool-order candidate, clears it on null, and drops it once the duration resolves", async () => {
+    const fixture = createGenerationRunLinkageFixture()
+    const { ctx } = createMutationCtx(fixture.tables)
+    const owner = await runOwner(ctx, fixture.runId)
+    const parts = [{ type: "text", text: "Answer" }]
+    await updateAssistantSnapshotForChat(ctx, owner, {
+      messageId: fixture.messageId, sequence: 1, textSnapshot: "Answer", partsSnapshot: parts,
+      workSummaryCandidateMs: 4400,
+    })
+    expect(fixture.message.metadata).toMatchObject({ workSummaryCandidateMs: 4400 })
+    // Same content, cleared candidate: still a write (the guard compares metadata).
+    const cleared = await updateAssistantSnapshotForChat(ctx, owner, {
+      messageId: fixture.messageId, sequence: 2, textSnapshot: "Answer", partsSnapshot: parts,
+      workSummaryCandidateMs: null,
+    })
+    expect(cleared).toMatchObject({ kind: "applied" })
+    expect(fixture.message.metadata).not.toHaveProperty("workSummaryCandidateMs")
+    await updateAssistantSnapshotForChat(ctx, owner, {
+      messageId: fixture.messageId, sequence: 3, textSnapshot: "Answer", partsSnapshot: parts,
+      workSummaryCandidateMs: 5000,
+    })
+    await updateAssistantSnapshotForChat(ctx, owner, {
+      messageId: fixture.messageId, sequence: 4, textSnapshot: "Answer", partsSnapshot: parts,
+      workSummaryDurationMs: 5000,
+    })
+    expect(fixture.message.metadata).toMatchObject({ workSummaryDurationMs: 5000 })
+    expect(fixture.message.metadata).not.toHaveProperty("workSummaryCandidateMs")
   })
 
   it("applies a checkpoint without retaining a routine snapshot row", async () => {

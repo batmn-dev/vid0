@@ -479,8 +479,8 @@ describe("durable turn runtime — settlement ordering", () => {
     const binding = turn.bind(makeToolFacts())
     await binding.stream.onChunk({
       type: "text-start", id: "final", providerMetadata: { openai: { phase: "final_answer" } },
-    }, 1250)
-    await binding.stream.onChunk({ type: "text-delta", id: "final", text: "done" }, 1250)
+    }, { durationMs: 1250 })
+    await binding.stream.onChunk({ type: "text-delta", id: "final", text: "done" }, { durationMs: 1250 })
 
     // The stream `onAbort` half flushes + marks aborted ("stream aborted")...
     await binding.stream.onAbort("stream aborted", 2500)

@@ -138,6 +138,7 @@ import {
   prepareTextFilePartsForModelInput,
 } from "./text-file-parts"
 import { excludeSystemRoleMessages } from "./utils"
+import { createInlineReasoningTagTransform } from "./inline-reasoning-tag-transform"
 import {
   createWordChunkingTransform,
   isWordChunkingEligible,
@@ -1427,11 +1428,26 @@ export function createChatTurnRuntime(args: {
     })
       ? createWordChunkingTransform(executionSignal)
       : undefined
-    const experimentalTransform = wordChunkingTransform
-      ? lifecycleTransform
-        ? [wordChunkingTransform, lifecycleTransform]
-        : wordChunkingTransform
-      : lifecycleTransform
+    // Inline reasoning tags are lifted FIRST so smoothing, the lifecycle
+    // transform, the durable tracker, Redis, and the browser all observe the
+    // same canonical reasoning/text parts (ADR-0041, C6).
+    const inlineReasoningTagTransform = modelConfig.inlineReasoningTags
+      ? createInlineReasoningTagTransform(
+          modelConfig.inlineReasoningTags,
+          executionSignal
+        )
+      : undefined
+    const composedTransforms = [
+      inlineReasoningTagTransform,
+      wordChunkingTransform,
+      lifecycleTransform,
+    ].filter((transform) => transform !== undefined)
+    const experimentalTransform =
+      composedTransforms.length === 0
+        ? undefined
+        : composedTransforms.length === 1
+          ? composedTransforms[0]
+          : composedTransforms
 
     // Commit the provider-consumption boundary BEFORE dispatch. This awaited
     // write is load-bearing billing state: if Stop/revocation wins, the worker
@@ -1612,11 +1628,20 @@ export function createChatTurnRuntime(args: {
           // Release time, read before the durable snapshot bookkeeping below.
           const releasedAtMs = Date.now()
           liveness.chunkReleased()
+          // The ONE observer: this callback precedes the UI-stream
+          // conversion for every part (start…finish/abort), so the end-time
+          // resolution below lands before the final snapshot and the finish
+          // metadata read it (ADR-0041, C5). Part order is final on either
+          // terminal; `onAbort` below resolves too because the SDK may notify
+          // it before the abort part reaches this callback.
           workSummaryDuration.observe(chunk)
-          const snapshotWrite = lifecycle.stream.onChunk(
-            chunk,
-            workSummaryDuration.getDurationMs()
-          )
+          if (chunk.type === "finish" || chunk.type === "abort") {
+            workSummaryDuration.resolveAtEnd()
+          }
+          const snapshotWrite = lifecycle.stream.onChunk(chunk, {
+            durationMs: workSummaryDuration.getDurationMs(),
+            candidateMs: workSummaryDuration.getCandidateMs(),
+          })
           // Liveness only — this callback sits downstream of the smoothing
           // transform, so any clock here would measure our own pacing.
           if (firstTextDeltaLatencyMs === null && chunk.type === "text-delta") {
@@ -1710,6 +1735,9 @@ export function createChatTurnRuntime(args: {
           // inert) — carrying cancellation evidence: the finished-step usage
           // aggregate when any step completed, otherwise
           // started-without-usage, plus the title attempt tracker's state.
+          // The pre-answer duration resolves here as well (ADR-0041, C5): on
+          // Stop the flush inside onAbort is the last snapshot the terminal
+          // run accepts, so the value must ride it, not the abort part.
           await lifecycle.stream.onAbort(
             "stream aborted",
             currentWorkDurationMs(),
@@ -1719,7 +1747,8 @@ export function createChatTurnRuntime(args: {
               },
               title: titleAttempt.current,
             },
-            buildTimingReceipt()
+            buildTimingReceipt(),
+            workSummaryDuration.resolveAtEnd()
           )
         },
 
@@ -2103,7 +2132,7 @@ export function createChatTurnRuntime(args: {
       sendReasoning: true,
       sendSources: true,
       messageMetadata: ({ part }) => {
-        workSummaryDuration.observe(part)
+        // Observed once, in onChunk above; this seam only reads the value.
         const workSummaryDurationMs = workSummaryDuration.getDurationMs()
         // Every stream part passes here, post-transform and in SDK order:
         // the receipt's released-output anchors (first-write delay, wire

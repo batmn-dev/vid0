@@ -40,6 +40,7 @@ import {
   type ToolCallEvidence,
   type ToolEvidenceUIPart,
   type TurnEvidence,
+  readReasoningVisibility,
 } from "./turn-evidence"
 import type { SearchImageResult } from "./turn-evidence"
 
@@ -235,7 +236,7 @@ export function deriveReasoningView(
     phase,
     text,
     displayableBlocks: reasoningParts
-      .filter((part) => part.text.trim().length > 0)
+      .filter((part) => readReasoningVisibility(part) === "visible")
       .map((part) => ({ text: part.text })),
     hasObservedActivity:
       reasoningParts.length > 0 || persistedDurationMs !== undefined,

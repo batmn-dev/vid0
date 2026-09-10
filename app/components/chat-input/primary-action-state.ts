@@ -12,7 +12,6 @@ type ResolveComposerPrimaryActionInput = {
 export type ComposerPrimaryActionState = {
   mode: ComposerPrimaryActionMode
   intent: ComposerPrimaryActionIntent
-  buttonType: "button" | "submit"
   disabled: boolean
   ariaLabel: string
   tooltip: string
@@ -28,7 +27,6 @@ export function resolveComposerPrimaryActionState({
     return {
       mode: "stop",
       intent: "stop",
-      buttonType: "button",
       disabled: !isAbortable,
       ariaLabel: "Stop",
       tooltip: "Stop",
@@ -38,7 +36,6 @@ export function resolveComposerPrimaryActionState({
   return {
     mode: "send",
     intent: "send",
-    buttonType: "submit",
     disabled: !canSend,
     ariaLabel: "Send prompt",
     tooltip: isMessageEmpty ? "Message is empty" : "Send prompt",

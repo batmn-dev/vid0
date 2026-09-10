@@ -188,10 +188,43 @@ export type ImpliedSearchEvidence = {
 export type TurnEvidenceItem =
   ReasoningEvidence | ToolCallEvidence | ImpliedSearchEvidence
 
+/**
+ * Explicit provider text phase (ADR-0041, C1). Only the OpenAI Responses
+ * adapter labels text parts today (`providerMetadata.openai.phase`); every
+ * other provider's text is unphased and falls to the C3 tool-order rule.
+ * This is the ONE reader — the client projection, the server work-summary
+ * tracker, and the replay prefix guard all call it; nothing else spells a
+ * provider namespace.
+ */
+export type TextPhase = "commentary" | "final_answer"
+
+export function readTextPhase(part: {
+  type: string
+  providerMetadata?: Record<string, Record<string, unknown> | undefined>
+}): TextPhase | undefined {
+  const phase = part.providerMetadata?.openai?.phase
+  return phase === "commentary" || phase === "final_answer" ? phase : undefined
+}
+
+/**
+ * Reasoning-part visibility (ADR-0041, C2). `opaque` covers Anthropic
+ * omitted/redacted blocks (signature only), OpenRouter encrypted details, and
+ * OpenAI items whose summary was empty. Opaque parts still count as observed
+ * activity (timer, "Thinking") but never produce a Reasoning section or
+ * inline narrative.
+ */
+export type ReasoningVisibility = "visible" | "opaque"
+
+export function readReasoningVisibility(part: {
+  text: string
+}): ReasoningVisibility {
+  return part.text.trim().length > 0 ? "visible" : "opaque"
+}
+
 export type TextEvidence = {
   id: string
   text: string
-  phase: "commentary" | "final_answer" | undefined
+  phase: TextPhase | undefined
   isStreaming: boolean
   /** Number of activity items preceding this text in canonical part order. */
   activityOffset: number
@@ -400,14 +433,10 @@ export function deriveTurnEvidence(
 
   ;(parts ?? []).forEach((part, partIndex) => {
     if (part.type === "text") {
-      const phase = part.providerMetadata?.openai?.phase
       textBlocks.push({
         id: `text-${partIndex}`,
         text: part.text,
-        phase:
-          phase === "commentary" || phase === "final_answer"
-            ? phase
-            : undefined,
+        phase: readTextPhase(part),
         isStreaming: part.state === "streaming",
         activityOffset: timeline.length,
       })

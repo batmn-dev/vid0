@@ -1,4 +1,5 @@
 import { mergeStreamMetadata } from "@/lib/chat-messages/metadata"
+import { readTextPhase } from "@/lib/chat-messages/turn-evidence"
 import { Chat } from "@ai-sdk/react"
 import {
   isToolUIPart,
@@ -79,11 +80,8 @@ function hasVisiblePrefix(next: UIMessage, previous: UIMessage | undefined) {
         return false
       // Phase changes move text between work and answer. Opaque metadata,
       // such as encrypted reasoning, can legitimately be replaced at the end.
-      const phase = part.type === "text"
-        ? part.providerMetadata?.openai?.phase
-        : undefined
-      return (phase !== "commentary" && phase !== "final_answer") ||
-        candidate.providerMetadata?.openai?.phase === phase
+      const phase = part.type === "text" ? readTextPhase(part) : undefined
+      return phase === undefined || readTextPhase(candidate) === phase
     }
     if (isToolUIPart(part) && isToolUIPart(candidate)) {
       if (part.toolCallId !== candidate.toolCallId) return false

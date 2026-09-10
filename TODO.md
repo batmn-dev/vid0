@@ -148,3 +148,13 @@ validate each upgrade with focused checks.
 responsiveness remains open. Measure TTFT with chat-performance spans, quantify
 the platform-funded title-usage wait before settlement, and verify streaming
 smoothness in the browser.
+- **Revisit the word-chunking allowlist:** only direct Haiku 4.5 and Gemini 3.5
+Flash get server-side smoothing (`MEASURED_WORD_CHUNKING_TARGETS`); every other
+route forwards raw provider slabs. The 2026-09-09 review measured Sonnet 5 at
+~130 chars per ~540 ms (direct and OpenRouter) and Opus 4.8 steady token-level
+in only half of runs, and the transform adds a bounded tail of ≤400 ms plus up
+to 80 ms before the first partial word. Decide, with our speed-first
+philosophy stated explicitly, whether that latency cost is ever worth paying on
+other routes, whether the allowlist should instead be a per-user preference,
+or whether the exception itself should be removed for consistency. Record the
+decision in ADR-0016.

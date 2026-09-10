@@ -210,6 +210,45 @@ it("cancels pre-active fades and retargets CSS height transitions after two fram
   ).toBe(true)
 })
 
+it("captures no paint clones while the document is hidden and releases retained ones on hide", () => {
+  // Exit activation is frame-bound and hidden documents get no frames: without
+  // this, every text update of a long reasoning stream left a full clone of the
+  // narrative in the DOM until the tab came back (101 clones, 1.2 MB of text).
+  render("Checking")
+  frame()
+  frame()
+  render("Checking sources.")
+  expect(container.querySelectorAll("[data-inline-work-snapshot]")).toHaveLength(1)
+  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true)
+  act(() => document.dispatchEvent(new Event("visibilitychange")))
+  expect(container.querySelectorAll("[data-inline-work-snapshot]")).toHaveLength(0)
+  expect(vi.getTimerCount()).toBe(0)
+  render("Checking sources and dates.")
+  render("Checking sources, dates and authors.")
+  expect(container.querySelectorAll("[data-inline-work-snapshot]")).toHaveLength(0)
+  expect(container.textContent).toBe("Checking sources, dates and authors.")
+  hidden.mockReturnValue(false)
+  render("Visible again.")
+  expect(container.querySelectorAll("[data-inline-work-snapshot]")).toHaveLength(1)
+})
+
+it("caps retained paint clones when frames stall while visible", () => {
+  render("0")
+  frame()
+  frame()
+  // No frame runs between updates, so no exit activates; the host must not
+  // grow past the cap and the oldest clone goes first.
+  for (let i = 1; i <= 9; i++) render(`text ${i}`)
+  const snapshots = container.querySelectorAll("[data-inline-work-snapshot]")
+  expect(snapshots).toHaveLength(6)
+  expect(snapshots[0].textContent).toBe("text 3")
+  expect(snapshots[5].textContent).toBe("text 8")
+  act(() => root.unmount())
+  root = createRoot(container)
+  expect(frames.size).toBe(0)
+  expect(vi.getTimerCount()).toBe(0)
+})
+
 it("renders replay and history immediately and cancels pending activation when animation stops", () => {
   render("First", false)
   render("First and second", false)

@@ -276,6 +276,25 @@ describe("inline work projection", () => {
     ).toBe("Answer")
   })
 
+  it("moves an unphased block into the work history by id in the same derivation a later tool arrives (C4)", () => {
+    const narration = text("Let me check.")
+    const before = project([narration])
+    expect(before.view.inlineContent.answerText).toBe("Let me check.")
+    expect(before.work.items.map((item) => item.kind)).not.toContain(
+      "commentary"
+    )
+    const after = project([narration, search])
+    expect(after.view.inlineContent.answerText).toBe("")
+    expect(after.view.inlineContent.hasFinalAnswer).toBe(false)
+    expect(after.work.items).toContainEqual(
+      expect.objectContaining({
+        kind: "commentary",
+        id: "text-0",
+        text: "Let me check.",
+      })
+    )
+  })
+
   it("detects an in-place provider phase change with identical text", () => {
     const part = text("Same text", "commentary")
     const before = project([part]).view

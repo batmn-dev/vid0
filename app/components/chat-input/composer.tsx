@@ -452,7 +452,8 @@ export const Composer = memo(
 
     const handlePrimaryActionClick = useCallback(
       (event: MouseEvent<HTMLButtonElement>) => {
-        // Stop can synchronously turn this same element into a submit button.
+        // Stop keeps type="submit" like ChatGPT so React DOM can still read the
+        // submitter after send morphs this element; preventDefault blocks resubmit.
         event.preventDefault()
         if (primaryAction.disabled || primaryAction.intent !== "stop") {
           return
@@ -756,7 +757,7 @@ export const Composer = memo(
                       visuallyDisabled={
                         primaryAction.mode === "send" && primaryAction.disabled
                       }
-                      type={primaryAction.buttonType}
+                      type="submit"
                       id="composer-submit-button"
                       data-testid="send-button"
                       onClick={

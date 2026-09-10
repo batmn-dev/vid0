@@ -312,6 +312,47 @@ describe("durable turn runtime internals", () => {
     })
   })
 
+  it("checkpoints the tool-order candidate, clears it explicitly, and lets a resolved duration supersede it", async () => {
+    // The candidate is metadata, not content: noting it must advance the
+    // content version so the checkpoint writes it, and a later tool call must
+    // reach the doc as an explicit null — otherwise a user Stop would promote
+    // an onset that just became commentary.
+    const persist = vi.fn().mockResolvedValue(undefined)
+    const tracker = createDurableSnapshotTracker({ persist, throttleMs: 0 })
+
+    emitTextChunk(tracker, "Answer")
+    await tracker.flush()
+    expect(persist).toHaveBeenCalledTimes(1)
+    expect(persist.mock.calls[0]?.[0]).not.toHaveProperty("workSummaryCandidateMs")
+
+    tracker.noteWorkSummary({ candidateMs: 4400 })
+    await tracker.flush()
+    expect(persist.mock.calls[1]?.[0]).toMatchObject({
+      textSnapshot: "Answer",
+      workSummaryCandidateMs: 4400,
+    })
+    expect(persist.mock.calls[1]?.[0]).not.toHaveProperty("workSummaryDurationMs")
+
+    tracker.noteWorkSummary({ candidateMs: undefined })
+    await tracker.flush()
+    expect(persist.mock.calls[2]?.[0]).toMatchObject({ workSummaryCandidateMs: null })
+
+    // Server-side abort after answer onset: the resolved value rides the flush
+    // even though text and parts are unchanged, and the candidate is cleared.
+    tracker.noteWorkSummary({ durationMs: 7265 })
+    await tracker.flush()
+    expect(persist).toHaveBeenCalledTimes(4)
+    expect(persist.mock.calls[3]?.[0]).toMatchObject({
+      workSummaryDurationMs: 7265,
+      workSummaryCandidateMs: null,
+    })
+
+    // Re-noting the same values is a no-op: no write storm from repeated chunks.
+    tracker.noteWorkSummary({ durationMs: 7265 })
+    await tracker.flush()
+    expect(persist).toHaveBeenCalledTimes(4)
+  })
+
   it("resolves overlapping flushes with bounded writes (post-Stop livelock)", async () => {
     // Regression: onAbort and the response-level onFinish both flush() within
     // ~200ms of a Stop. With a shared boolean `pending` flag, the two forced

@@ -80,6 +80,16 @@ export type ActivityPanelTarget = {
   panelMessage: UIMessage | undefined
   isGenerationActive: boolean
   isPendingActivityTurn: boolean
+  /**
+   * The message the live work clock anchors to: the default turn once it has
+   * renderable evidence, or the pending assistant message from the moment
+   * the stream's `start` chunk created it. Anchoring to arrival rather than
+   * to the first renderable part keeps the live "Worked for Ns" estimate on
+   * the server clock's origin (ADR-0041): a turn whose first renderable part
+   * arrives late (no reasoning, slow first tool) otherwise reads seconds
+   * short of its settled value.
+   */
+  workClockMessage: UIMessage | undefined
   /** False when `selectedActivityTurnId` matched no rendered turn (the panel
    * silently fell back to the default). Vacuously true with no selection. */
   selectedTurnPresent: boolean
@@ -235,6 +245,12 @@ export function selectActivityPanelTarget({
     : activeTurn.kind === "live" && activeTurn.message === defaultMessage
       ? activeTurn.view
       : deriveAssistantTurnView(defaultMessage, status)
+  const lastMessage = messages[messages.length - 1]
+  const workClockMessage =
+    defaultMessage ??
+    (hasPendingAssistantTurn && lastMessage?.role === "assistant"
+      ? lastMessage
+      : undefined)
 
   return {
     defaultActivityTurnId,
@@ -244,6 +260,7 @@ export function selectActivityPanelTarget({
     panelMessage: selectedMessage ?? defaultMessage,
     isGenerationActive: generationActive,
     isPendingActivityTurn: panelActivityTurnId === PENDING_ACTIVITY_TURN_ID,
+    workClockMessage,
     selectedTurnPresent:
       selectedActivityTurnId === undefined ||
       selectedPendingTurn ||
@@ -286,6 +303,7 @@ export function useActivityPanel({
     panelMessage,
     isGenerationActive: generationActive,
     isPendingActivityTurn,
+    workClockMessage,
     selectedTurnPresent,
   } = selectActivityPanelTarget({
     messages,
@@ -312,14 +330,18 @@ export function useActivityPanel({
 
   const defaultWorkDuration = useAssistantWorkDuration({
     persistedWorkDurationMs: defaultView?.persistedWorkDurationMs,
-    isActive: Boolean(defaultMessage) && generationActive,
+    // Runs from the assistant message's arrival (see `workClockMessage`), so
+    // the pending placeholder and the live turn share one clock.
+    isActive: Boolean(workClockMessage) && generationActive,
     // The run-presentation resolver owns approval liveness. Local transport
     // can remain streaming after the durable run pauses, and the durable
     // message can retain awaiting_approval briefly after continuation.
     isPaused: Boolean(defaultMessage) && isApprovalPaused,
     // Turn identity for the timer: a new generation or branch default must
     // restart from zero and never inherit the previous turn's frozen duration.
-    turnKey: defaultActivityTurnId,
+    // Keyed by the assistant message, not the pending sentinel, so the clock
+    // survives the pending→live handoff of the same message.
+    turnKey: getActivityTurnId(workClockMessage),
   })
   const defaultReasoningDuration = useReasoningPhase({
     reasoning: defaultView?.reasoning ?? IDLE_REASONING_VIEW,

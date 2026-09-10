@@ -9,6 +9,7 @@ import type {
   AssistantTurnView,
 } from "./assistant-turn"
 import { getMessageProvider } from "./metadata"
+import { readReasoningVisibility } from "./turn-evidence"
 
 export type InlineWorkItem =
   | { kind: "commentary"; id: string; text: string; streaming: boolean }
@@ -225,7 +226,9 @@ export function deriveAssistantInlineWork(
   }
   return {
     items: displayItems.filter(
-      (item) => item.kind !== "reasoning" || item.text.trim().length > 0
+      (item) =>
+        item.kind !== "reasoning" ||
+        readReasoningVisibility(item) === "visible"
     ),
     mode: live ? "live" : "complete",
     label,

@@ -565,6 +565,17 @@ it.each([
     ],
     accepts: false,
   },
+  {
+    // Legacy aggregate checkpoints carry no phase; the guard (via readTextPhase)
+    // only compares phases when the checkpoint has one (ADR-0041, Section 8).
+    name: "unphased legacy checkpoint meets a phased candidate",
+    checkpointPart: { type: "text", text: "Recovered", state: "streaming" },
+    history: [
+      { type: "text-start", id: "answer", providerMetadata: { openai: { phase: "final_answer" } } },
+      { type: "text-delta", id: "answer", delta: "Recovered answer" },
+    ],
+    accepts: true,
+  },
 ] satisfies {
   name: string
   checkpointPart: UIMessage["parts"][number]

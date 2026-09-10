@@ -57,7 +57,15 @@ const perplexityModels: ModelConfig[] = [
     tools: false,
     searchMode: "always-on",
     audio: false,
+    // 2026-09-09: the model card documents a literal <think> section inside
+    // content, so the runtime lifts one into reasoning parts whenever it
+    // appears (`inlineReasoningTags`, ADR-0041). Live streaming through the
+    // installed adapter showed NO tags and no reasoning: the API's default
+    // `stream_mode: "full"` suppresses reasoning events, and the adapter's
+    // chunk schema has no field for the "concise" mode's separate events.
+    // The route therefore cannot show reasoning today; keep the flag false.
     reasoningText: false,
+    inlineReasoningTags: "think",
     openSource: false,
     speed: "Medium",
     intelligence: "High",
