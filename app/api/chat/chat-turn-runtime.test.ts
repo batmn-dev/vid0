@@ -1764,6 +1764,70 @@ describe("createChatTurnRuntime — reasoning lifecycle timing", () => {
     }
   })
 
+  it("keeps the tool-order pre-answer duration when the provider fails after answer onset", async () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(0)
+    try {
+      const harness = makeStreamHarness()
+      vi.mocked(toUIMessageStream).mockImplementation((opts: any) => {
+        if (opts.messageMetadata) harness.captured.responseOpts = opts
+        void opts.stream?.pipeTo(new WritableStream()).catch(() => {})
+        return new ReadableStream({
+          start(controller) {
+            controller.close()
+          },
+        })
+      })
+      const wire = makeWorkerWire()
+      const runtime = createChatTurnRuntime({
+        input: makeInput(),
+        deps: makeDeps(harness, makeFetchMutation(), { durableWorkerWire: wire }),
+      })
+      await runtime.prepare()
+      await runtime.toResponse(notAbortedSignal())
+
+      dateNow.mockReturnValue(1000)
+      harness.captured.streamOpts.onChunk({
+        chunk: { type: "tool-call", toolCallId: "c1", toolName: "web_search", input: {} },
+      })
+      dateNow.mockReturnValue(4400)
+      harness.captured.streamOpts.onChunk({
+        chunk: { type: "text-start", id: "answer" },
+      })
+      harness.captured.streamOpts.onChunk({
+        chunk: { type: "text-delta", id: "answer", text: "As of today" },
+      })
+
+      // Provider failure: the SDK notifies onChunk with the error part, then
+      // onError. No finish or abort ever comes, and the throttled checkpoint
+      // has not fired, so the failure flush is the only write that can carry
+      // the resolved value.
+      dateNow.mockReturnValue(9000)
+      harness.captured.streamOpts.onChunk({
+        chunk: { type: "error", error: new Error("model failed") },
+      })
+      harness.captured.streamOpts.onError(new Error("model failed"))
+
+      await vi.waitFor(() => {
+        expect(wireCall(wire, "markGenerationRunFailed")).toBeDefined()
+      })
+      const ops = wire.calls.map((call) => call.op)
+      expect(ops.lastIndexOf("updateAssistantSnapshot")).toBeLessThan(
+        ops.indexOf("markGenerationRunFailed")
+      )
+      const snapshots = wire.calls.filter(
+        (call) => call.op === "updateAssistantSnapshot"
+      )
+      expect(snapshots.at(-1)?.args).toMatchObject({
+        workSummaryDurationMs: 4400,
+      })
+      expect(wireCall(wire, "markGenerationRunFailed")?.args).toMatchObject({
+        workDurationMs: 9000,
+      })
+    } finally {
+      dateNow.mockRestore()
+    }
+  })
+
   it("persists the union of explicit reasoning intervals and ignores deltas as starts", async () => {
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(0)
     try {

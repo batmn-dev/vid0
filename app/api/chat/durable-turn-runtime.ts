@@ -326,10 +326,17 @@ export type DurableStreamBinding = {
       workSummary?: WorkSummarySnapshot
     ): Promise<void> | void
     recordStep(step: DurableStepRecord): void
+    /**
+     * Flush the snapshot, then mark the run failed. The failure verdict
+     * promotes whatever candidate the message doc holds, so the resolved
+     * pre-answer duration (or a cleared candidate) must land first.
+     */
     noteStreamError(
       failure: DurableFailure,
       workDurationMs: number,
-      timingReceipt?: RunTimingReceipt
+      timingReceipt?: RunTimingReceipt,
+      /** Pre-answer duration resolved at the error terminal; rides the flush. */
+      workSummaryDurationMs?: number
     ): void
     /**
      * Flush the snapshot, then mark the run aborted — carrying terminal
@@ -1902,10 +1909,21 @@ export function createConvexDurableTurn(args: {
             )
           },
 
-          noteStreamError(failure, workDurationMs, timingReceipt) {
+          noteStreamError(
+            failure,
+            workDurationMs,
+            timingReceipt,
+            workSummaryDurationMs
+          ) {
             const normalizedFailure = normalizeDurableFailure(failure)
+            // Mirror onAbort: note the resolved pre-answer duration and flush
+            // BEFORE the run turns terminal, so a failure between checkpoints
+            // neither loses the number nor lets the verdict promote a
+            // candidate a later tool call already cleared (ADR-0041, C5).
+            tracker.noteWorkSummary({ durationMs: workSummaryDurationMs })
             void (async () => {
               await drainPendingWrites(stepWritePromises)
+              await tracker.flush().catch(() => {})
               await workerWrite("markGenerationRunFailed", {
                 messageId: currentMessageId,
                 error: normalizedFailure.message,

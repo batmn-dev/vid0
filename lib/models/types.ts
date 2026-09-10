@@ -226,9 +226,11 @@ type ModelConfig = {
    * The Chat turn runtime lifts that section into ordinary reasoning parts at
    * the stream seam (ADR-0041) so persisted content, replay, and the UI never
    * see the tag text. Independent of `reasoningText`, which states whether the
-   * route can actually deliver reasoning today (Perplexity's default stream
-   * mode suppresses it, so its route keeps `false` while still declaring the
-   * tag as the documented-behavior guard).
+   * route can actually deliver reasoning today. Declare it only for a route
+   * that demonstrably streams the tags: the lift removes every literal section
+   * from the answer, so on a route that never emits them (Perplexity's default
+   * stream mode suppresses reasoning) it would only strip content a user asked
+   * for. No shipped route declares it today.
    */
   inlineReasoningTags?: "think"
   openSource?: boolean

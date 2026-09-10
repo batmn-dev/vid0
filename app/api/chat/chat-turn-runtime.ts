@@ -1635,7 +1635,16 @@ export function createChatTurnRuntime(args: {
           // terminal; `onAbort` below resolves too because the SDK may notify
           // it before the abort part reaches this callback.
           workSummaryDuration.observe(chunk)
-          if (chunk.type === "finish" || chunk.type === "abort") {
+          // `error` is the third end-of-order signal: the SDK notifies this
+          // callback with the error part, then `onError`, and no finish or
+          // abort follows. Resolving here lets the failure flush below carry
+          // the number instead of whatever candidate the last throttled
+          // checkpoint happened to hold.
+          if (
+            chunk.type === "finish" ||
+            chunk.type === "abort" ||
+            chunk.type === "error"
+          ) {
             workSummaryDuration.resolveAtEnd()
           }
           const snapshotWrite = lifecycle.stream.onChunk(chunk, {
@@ -1672,10 +1681,14 @@ export function createChatTurnRuntime(args: {
           const errorType = classifyChatError(err)
           // Mark the durable run failed (guest: inert). The parent already
           // computed `errorMessage` for its telemetry below — pass the string.
+          // The pre-answer duration resolved on the `error` chunk (or here,
+          // idempotently, if the SDK skipped it) rides the failure flush so
+          // the terminal verdict promotes the real value (ADR-0041, C5).
           lifecycle.stream.noteStreamError(
             { message: errorMessage, recovery: publicError.recovery },
             currentWorkDurationMs(),
-            buildTimingReceipt()
+            buildTimingReceipt(),
+            workSummaryDuration.resolveAtEnd()
           )
           logBraintrustTraceMetadata(braintrustSpan, {
             ...braintrustMetadata,
