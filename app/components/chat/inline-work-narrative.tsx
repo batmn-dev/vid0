@@ -23,6 +23,13 @@ function afterTwoFrames(callback: () => void) {
   return () => window.cancelAnimationFrame(frame)
 }
 
+// Exit activation waits two frames, so retention is frame-bound: a long
+// reasoning stream at one text update per frame keeps only a handful of paint
+// clones alive. Above this many the oldest is released at once. It guards the
+// visible-tab case where layout starves frames; the hidden-tab case (no frames
+// at all) skips capture entirely because nothing paints there.
+const MAX_RETAINED_SNAPSHOTS = 6
+
 // Capture the committed DOM before React updates it; the Markdown tree itself
 // remains mounted. Only the empty snapshot host is managed imperatively.
 class NarrativePaint extends Component<
@@ -53,10 +60,36 @@ class NarrativePaint extends Component<
     const current = this.current.current
     if (!current) return
     this.targetHeight = current.getBoundingClientRect().height
+    document.addEventListener("visibilitychange", this.handleVisibilityChange)
     if (this.canAnimate()) {
       this.scheduleEnter(0, 260)
       this.observeCurrent()
     }
+  }
+
+  // Frames never come while the document is hidden, so retained clones would
+  // only pile up (each one is the whole narrative). Release them now; the
+  // canonical tree stays put and animates fresh on the next visible update.
+  private handleVisibilityChange = () => {
+    if (document.hidden) this.releaseSnapshots()
+  }
+
+  private releaseSnapshot(paint: HTMLDivElement) {
+    this.pendingExits.get(paint)?.()
+    this.pendingExits.delete(paint)
+    const timer = this.cleanupTimers.get(paint)
+    if (timer !== undefined) window.clearTimeout(timer)
+    this.cleanupTimers.delete(paint)
+    this.snapshotAnimations.get(paint)?.cancel()
+    this.snapshotAnimations.delete(paint)
+    paint.remove()
+  }
+
+  private releaseSnapshots() {
+    const host = this.snapshots.current
+    if (!host) return
+    for (const paint of Array.from(host.children))
+      this.releaseSnapshot(paint as HTMLDivElement)
   }
 
   private observeCurrent() {
@@ -83,6 +116,7 @@ class NarrativePaint extends Component<
       !this.canAnimate() ||
       !previous.animate ||
       previous.text === this.props.text ||
+      document.hidden ||
       !current
     )
       return null
@@ -128,7 +162,10 @@ class NarrativePaint extends Component<
         this.targetHeight
     this.observeCurrent()
     if (!snapshot) return
-    this.snapshots.current?.appendChild(snapshot.paint)
+    const host = this.snapshots.current
+    while (host && host.children.length >= MAX_RETAINED_SNAPSHOTS)
+      this.releaseSnapshot(host.children[0] as HTMLDivElement)
+    host?.appendChild(snapshot.paint)
     // Interrupted incoming snapshots continue their original fade while retained.
     if (snapshot.opacityTime !== null) {
       const fade = snapshot.paint.animate([{ opacity: 0 }, { opacity: 1 }], {
@@ -145,12 +182,7 @@ class NarrativePaint extends Component<
         this.pendingExits.delete(snapshot.paint)
         this.cleanupTimers.set(
           snapshot.paint,
-          window.setTimeout(() => {
-            this.snapshotAnimations.get(snapshot.paint)?.cancel()
-            this.snapshotAnimations.delete(snapshot.paint)
-            snapshot.paint.remove()
-            this.cleanupTimers.delete(snapshot.paint)
-          }, 300)
+          window.setTimeout(() => this.releaseSnapshot(snapshot.paint), 300)
         )
       })
     )
@@ -224,16 +256,14 @@ class NarrativePaint extends Component<
       frame.style.transitionTimingFunction = ""
       frame.style.transitionDelay = ""
     }
-    for (const timer of this.cleanupTimers.values()) window.clearTimeout(timer)
-    this.cleanupTimers.clear()
-    for (const cancel of this.pendingExits.values()) cancel()
-    this.pendingExits.clear()
-    for (const fade of this.snapshotAnimations.values()) fade.cancel()
-    this.snapshotAnimations.clear()
-    this.snapshots.current?.replaceChildren()
+    this.releaseSnapshots()
   }
 
   componentWillUnmount() {
+    document.removeEventListener(
+      "visibilitychange",
+      this.handleVisibilityChange
+    )
     this.observer?.disconnect()
     this.clearPaint()
   }

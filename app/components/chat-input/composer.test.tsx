@@ -509,7 +509,7 @@ describe("Composer primary action", () => {
     expect(button).toBeTruthy()
     expect(button?.disabled).toBe(false)
     expect(button?.getAttribute("aria-disabled")).toBe("false")
-    expect(button?.type).toBe("button")
+    expect(button?.type).toBe("submit")
 
     act(() => {
       button?.click()

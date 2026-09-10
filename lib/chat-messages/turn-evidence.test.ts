@@ -4,6 +4,8 @@ import { getSources } from "./sources"
 import {
   classifyToolName,
   deriveTurnEvidence,
+  readReasoningVisibility,
+  readTextPhase,
   resolveEntryStatus,
   type ToolCallEvidence,
 } from "./turn-evidence"
@@ -348,5 +350,33 @@ describe("source provenance", () => {
       },
     ])
     expect(deriveTurnEvidence(fixture).sources).toEqual(getSources(fixture))
+  })
+})
+
+describe("provider phase and reasoning visibility readers (ADR-0041)", () => {
+  it.each([
+    // provider-shaped text fixture, expected phase
+    ["OpenAI commentary", { openai: { itemId: "msg_1", phase: "commentary" } }, "commentary"],
+    ["OpenAI final answer", { openai: { itemId: "msg_2", phase: "final_answer" } }, "final_answer"],
+    ["OpenAI unknown phase value", { openai: { phase: "preamble" } }, undefined],
+    ["Anthropic (no phase)", { anthropic: {} }, undefined],
+    ["Google thought signature", { google: { thoughtSignature: "sig" } }, undefined],
+    ["xAI item id", { xai: { itemId: "rs_1" } }, undefined],
+    ["no metadata", undefined, undefined],
+  ] as const)("reads %s through the one phase reader", (_name, providerMetadata, expected) => {
+    const part = { type: "text", text: "x", ...(providerMetadata ? { providerMetadata } : {}) }
+    expect(readTextPhase(part)).toBe(expected)
+    expect(deriveTurnEvidence(parts([part])).textBlocks[0].phase).toBe(expected)
+  })
+
+  it.each([
+    ["OpenAI summary", "**Checking**\n\nSummarized.", "visible"],
+    ["Anthropic summarized", "The user wants a count.", "visible"],
+    ["Anthropic omitted (signature only)", "", "opaque"],
+    ["Anthropic redacted", "", "opaque"],
+    ["OpenRouter encrypted details", "  \n", "opaque"],
+    ["Perplexity lifted think", "Let me reason.", "visible"],
+  ] as const)("classifies %s reasoning", (_name, text, expected) => {
+    expect(readReasoningVisibility({ text })).toBe(expected)
   })
 })

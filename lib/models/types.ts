@@ -220,6 +220,19 @@ type ModelConfig = {
    * unsupported is a deliberate opt-out.
    */
   searchMode?: SearchMode
+  /**
+   * The provider returns its reasoning inline in the answer text as a
+   * literal tag section (Perplexity `sonar-reasoning-pro`: `<think>…</think>`).
+   * The Chat turn runtime lifts that section into ordinary reasoning parts at
+   * the stream seam (ADR-0041) so persisted content, replay, and the UI never
+   * see the tag text. Independent of `reasoningText`, which states whether the
+   * route can actually deliver reasoning today. Declare it only for a route
+   * that demonstrably streams the tags: the lift removes every literal section
+   * from the answer, so on a route that never emits them (Perplexity's default
+   * stream mode suppresses reasoning) it would only strip content a user asked
+   * for. No shipped route declares it today.
+   */
+  inlineReasoningTags?: "think"
   openSource?: boolean
 
   /**

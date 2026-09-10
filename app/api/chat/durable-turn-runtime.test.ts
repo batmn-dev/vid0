@@ -479,8 +479,8 @@ describe("durable turn runtime — settlement ordering", () => {
     const binding = turn.bind(makeToolFacts())
     await binding.stream.onChunk({
       type: "text-start", id: "final", providerMetadata: { openai: { phase: "final_answer" } },
-    }, 1250)
-    await binding.stream.onChunk({ type: "text-delta", id: "final", text: "done" }, 1250)
+    }, { durationMs: 1250 })
+    await binding.stream.onChunk({ type: "text-delta", id: "final", text: "done" }, { durationMs: 1250 })
 
     // The stream `onAbort` half flushes + marks aborted ("stream aborted")...
     await binding.stream.onAbort("stream aborted", 2500)
@@ -597,6 +597,40 @@ describe("durable turn runtime — settlement ordering", () => {
     expect(ops.indexOf("recordToolInvocations")).toBeLessThan(
       ops.indexOf("markGenerationRunFailed")
     )
+  })
+
+  it("flushes the resolved pre-answer duration before marking the run failed after a provider error part", async () => {
+    const { turn, wire } = await makePreparedTurn()
+    const binding = turn.bind(makeToolFacts())
+    await binding.stream.onChunk({
+      type: "tool-call", toolCallId: "c1", toolName: "web_search", input: {},
+    } as TextStreamPart<ToolSet>)
+    await binding.stream.onChunk(
+      { type: "text-start", id: "answer" },
+      { candidateMs: 4400 }
+    )
+    await binding.stream.onChunk(
+      { type: "text-delta", id: "answer", text: "As of today" },
+      { candidateMs: 4400 }
+    )
+    // Real reducer, real terminal: the provider error part errors the
+    // reader (`terminateOnError`), so the tracker's drain rejects. The
+    // failure flush must still persist the resolved value, because the
+    // failure verdict promotes whatever the message doc holds.
+    await binding.stream.onChunk({ type: "error", error: new Error("model failed") })
+    binding.stream.noteStreamError("model failed", 9000, undefined, 4400)
+
+    await vi.waitFor(() => {
+      expect(wireCalls(wire, "markGenerationRunFailed")).toHaveLength(1)
+    })
+    const ops = orderedOps(wire)
+    const lastSnapshot = ops.lastIndexOf("updateAssistantSnapshot")
+    expect(lastSnapshot).toBeGreaterThanOrEqual(0)
+    expect(lastSnapshot).toBeLessThan(ops.indexOf("markGenerationRunFailed"))
+    expect(wireCalls(wire, "updateAssistantSnapshot").at(-1)?.args).toMatchObject({
+      workSummaryDurationMs: 4400,
+      workSummaryCandidateMs: null,
+    })
   })
 })
 

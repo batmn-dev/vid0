@@ -76,6 +76,10 @@ export const vToolInvocationStreamMetadata = v.object({
   // Optional while production may contain rows written before work timing.
   workDurationMs: v.optional(v.number()),
   workSummaryDurationMs: v.optional(v.number()),
+  // Tentative tool-order pre-answer onset while the stream is open (ADR-0041,
+  // C5): the UI never reads it; a lifecycle terminal (user Stop first of all)
+  // promotes it to `workSummaryDurationMs`, and completion replaces the blob.
+  workSummaryCandidateMs: v.optional(v.number()),
   // Applied per-turn reasoning effort (ADR-0026); shared vocabulary mirror.
   reasoningEffort: v.optional(vReasoningEffort),
   // Applied total generation allowance (ADR-0028), including reasoning.

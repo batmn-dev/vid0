@@ -41,6 +41,8 @@ export type ToolInvocationStreamMetadata = {
   workDurationMs?: number
   /** Observed work before the provider's explicit final-answer boundary. */
   workSummaryDurationMs?: number
+  /** Tentative tool-order onset carried by checkpoints (ADR-0041, C5); server-internal, promoted at a lifecycle terminal. */
+  workSummaryCandidateMs?: number
   /** Generation stats (ADR-0030), stamped at finish from SDK step performance. */
   generationStats?: GenerationStats
   toolMetadataByName?: ToolInvocationMetadataByName

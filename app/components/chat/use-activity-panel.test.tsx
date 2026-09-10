@@ -552,6 +552,65 @@ describe("useActivityPanel ownership", () => {
     expect(latest!.panelActivityTurnId).toBe("a2")
   })
 
+  it("runs the work clock from the pending assistant's arrival and keeps it across the pending→live handoff", () => {
+    vi.useFakeTimers()
+    try {
+      const shell = {
+        id: "a2",
+        role: "assistant",
+        parts: [],
+      } as unknown as UIMessage
+      const history = [user("u1"), assistant("a1"), user("u2")]
+
+      // Start chunk created the shell: no renderable evidence, clock running.
+      render({
+        messages: [...history, shell],
+        status: "streaming",
+        isSubmitting: false,
+      })
+      expect(latest!.defaultActivityTurnId).toBe(PENDING_ACTIVITY_TURN_ID)
+      act(() => {
+        vi.advanceTimersByTime(2000)
+      })
+      expect(latest!.defaultActivityDurationMs).toBe(2000)
+
+      // First renderable part: same message, so the clock continues.
+      render({
+        messages: [
+          ...history,
+          { ...shell, parts: [{ type: "text", text: "First" }] },
+        ],
+        status: "streaming",
+        isSubmitting: false,
+      })
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(latest!.defaultActivityTurnId).toBe("a2")
+      expect(latest!.defaultActivityDurationMs).toBe(3000)
+
+      // A regenerated turn is a new assistant message: the clock restarts.
+      render({
+        messages: [...history, { ...shell, id: "a3" }],
+        status: "streaming",
+        isSubmitting: false,
+      })
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(latest!.defaultActivityDurationMs).toBe(1000)
+    } finally {
+      const rootToUnmount = root
+      if (rootToUnmount) {
+        act(() => {
+          rootToUnmount.unmount()
+        })
+      }
+      root = null
+      vi.useRealTimers()
+    }
+  })
+
   it("follows only the default streaming turn and changes its turn key", () => {
     render({
       messages: [

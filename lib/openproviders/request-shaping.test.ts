@@ -41,7 +41,9 @@ describe("shapeRequest provider options", () => {
         thinkingMode: "adaptive",
       },
       ctx: { searchToolsActive: false, hasTools: true },
-      expected: { anthropic: { thinking: { type: "adaptive" } } },
+      expected: {
+        anthropic: { thinking: { type: "adaptive", display: "summarized" } },
+      },
     },
     {
       // The pause_turn downgrade is catalog-driven: only 4.6-generation
@@ -70,7 +72,9 @@ describe("shapeRequest provider options", () => {
         thinkingMode: "adaptive",
       },
       ctx: { searchToolsActive: true, hasTools: true },
-      expected: { anthropic: { thinking: { type: "adaptive" } } },
+      expected: {
+        anthropic: { thinking: { type: "adaptive", display: "summarized" } },
+      },
     },
     {
       // The flag without active search tools changes nothing.
@@ -82,7 +86,9 @@ describe("shapeRequest provider options", () => {
         searchThinkingDowngrade: true,
       },
       ctx: { searchToolsActive: false, hasTools: true },
-      expected: { anthropic: { thinking: { type: "adaptive" } } },
+      expected: {
+        anthropic: { thinking: { type: "adaptive", display: "summarized" } },
+      },
     },
     {
       name: "anthropic fixed-budget model uses its declared thinkingBudget",
@@ -145,8 +151,16 @@ describe("shapeRequest provider options", () => {
       expected: {},
     },
     {
-      name: "reasoning model on a provider without thinking options gets none",
+      // Mistral reasoning is off unless reasoning_effort is "high" (the
+      // adapter's only enabling value).
+      name: "mistral reasoning model asks for high reasoning effort",
       model: { providerId: "mistral", reasoningText: true },
+      ctx: NO_TOOLS,
+      expected: { mistral: { reasoningEffort: "high" } },
+    },
+    {
+      name: "reasoning model on a provider without thinking options gets none",
+      model: { providerId: "perplexity", reasoningText: true },
       ctx: NO_TOOLS,
       expected: {},
     },
@@ -231,7 +245,10 @@ describe("per-turn reasoning effort (ADR-0026)", () => {
         ctx
       ).providerOptions
     ).toEqual({
-      anthropic: { thinking: { type: "adaptive" }, effort: "xhigh" },
+      anthropic: {
+        thinking: { type: "adaptive", display: "summarized" },
+        effort: "xhigh",
+      },
     })
     expect(
       shapeRequest(makeModel({ providerId: "openai", reasoningText: true }), {
@@ -321,6 +338,34 @@ describe("shapeRequest headers", () => {
 })
 
 describe("catalog contract for Request shaping", () => {
+  // Opus 4.8/Sonnet 5/Fable 5 default `display` to "omitted" (thinking blocks
+  // stream empty). Request shaping asks for "summarized" explicitly; the
+  // search-downgrade fixed-budget path must not carry `display` at all.
+  it.each(["claude-opus-4-8", "claude-sonnet-5", "claude-fable-5"])(
+    "%s sends adaptive thinking with display: summarized",
+    async (id) => {
+      const model = (await getAllModels()).find((m) => m.id === id)
+      expect(model).toBeDefined()
+      expect(
+        shapeRequest(model!, { searchToolsActive: true, hasTools: true })
+          .providerOptions
+      ).toEqual({
+        anthropic: { thinking: { type: "adaptive", display: "summarized" } },
+      })
+    }
+  )
+
+  it("the 4.6 search downgrade sends a fixed budget without display", async () => {
+    const model = (await getAllModels()).find((m) => m.id === "claude-opus-4-6")
+    expect(model?.searchThinkingDowngrade).toBe(true)
+    const { providerOptions } = shapeRequest(model!, {
+      searchToolsActive: true,
+      hasTools: true,
+    })
+    expect(providerOptions.anthropic?.thinking).toMatchObject({ type: "enabled" })
+    expect(providerOptions.anthropic?.thinking).not.toHaveProperty("display")
+  })
+
   // Request shaping resolves the fixed thinking budget from the model's
   // `thinkingBudget` field, replacing the old model-id string matching
   // (`includes("opus"/"sonnet"/"haiku")`). That string match was an implicit

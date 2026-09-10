@@ -169,6 +169,8 @@ export const generationRunWriteArgs = {
     textSnapshot: v.string(),
     partsSnapshot: v.any(),
     workSummaryDurationMs: v.optional(v.number()),
+    // Tentative tool-order onset (ADR-0041, C5); null clears an obsolete one.
+    workSummaryCandidateMs: v.optional(v.union(v.number(), v.null())),
   },
   recordToolInvocations: {
     messageId: v.id("messages"),
@@ -757,6 +759,61 @@ async function projectRunStatusToChat(
 // deleted). Call sites that write extra run fields keep them: completed's
 // usage/toolCounts and approval-requested's minimal pause patch the run
 // directly rather than routing through here.
+/**
+ * A terminal transition completes the turn's part order, so the tentative
+ * tool-order pre-answer onset the checkpoints carried becomes the value
+ * (ADR-0041, C5). User Stop is the case that needs this: the client's mutation
+ * IS the run's terminal and the worker can write nothing afterwards, so the
+ * number must already be on the message. Undefined when nothing to promote.
+ */
+function promoteWorkSummaryCandidate(
+  metadata: PersistedMessageMetadata | undefined
+): PersistedMessageMetadata | undefined {
+  if (!metadata || metadata.workSummaryCandidateMs === undefined) return undefined
+  const { workSummaryCandidateMs, ...rest } = metadata
+  return {
+    ...rest,
+    workSummaryDurationMs: rest.workSummaryDurationMs ?? workSummaryCandidateMs,
+  }
+}
+
+/**
+ * Checkpoint metadata: a resolved pre-answer duration supersedes the
+ * candidate; an explicit null clears a candidate an earlier checkpoint carried
+ * (a later tool call made that text commentary). Undefined when nothing changes.
+ */
+function resolveSnapshotMetadata(
+  current: PersistedMessageMetadata | undefined,
+  args: { workSummaryDurationMs?: number; workSummaryCandidateMs?: number | null }
+): PersistedMessageMetadata | undefined {
+  if (args.workSummaryDurationMs === undefined && args.workSummaryCandidateMs === undefined) {
+    return undefined
+  }
+  const next: PersistedMessageMetadata = { ...(current ?? {}) }
+  let changed = false
+  if (
+    args.workSummaryDurationMs !== undefined &&
+    next.workSummaryDurationMs !== args.workSummaryDurationMs
+  ) {
+    next.workSummaryDurationMs = args.workSummaryDurationMs
+    changed = true
+  }
+  const candidate =
+    args.workSummaryDurationMs !== undefined || args.workSummaryCandidateMs === null
+      ? undefined
+      : args.workSummaryCandidateMs
+  if (candidate === undefined) {
+    if (next.workSummaryCandidateMs !== undefined) {
+      delete next.workSummaryCandidateMs
+      changed = true
+    }
+  } else if (next.workSummaryCandidateMs !== candidate) {
+    next.workSummaryCandidateMs = candidate
+    changed = true
+  }
+  return changed ? next : undefined
+}
+
 async function applyLifecycleVerdict(
   ctx: MutationCtx,
   run: Doc<"generationRuns">,
@@ -788,13 +845,16 @@ async function applyLifecycleVerdict(
         ? undefined
         : run.assistantMessageId)
 
-    if (survivingId && workDurationMs !== undefined) {
-      await ctx.db.patch(survivingId, {
-        metadata: {
-          ...(resolved.message.metadata ?? {}),
-          workDurationMs,
-        },
-      })
+    if (survivingId) {
+      const promoted = promoteWorkSummaryCandidate(resolved.message.metadata)
+      if (workDurationMs !== undefined || promoted) {
+        await ctx.db.patch(survivingId, {
+          metadata: {
+            ...(promoted ?? resolved.message.metadata ?? {}),
+            ...(workDurationMs !== undefined ? { workDurationMs } : {}),
+          },
+        })
+      }
     }
   }
 
@@ -2481,6 +2541,7 @@ export async function updateAssistantSnapshotForChat(
     textSnapshot: string
     partsSnapshot: unknown
     workSummaryDurationMs?: number
+    workSummaryCandidateMs?: number | null
   }
 ) {
   const { run } = owner
@@ -2528,11 +2589,11 @@ export async function updateAssistantSnapshotForChat(
   // (potentially large) message doc. Historical storms wrote identical
   // ~7 KB checkpoints at ~59 ms cadence for minutes; the sequence guard cannot
   // reject them because sequences advance.
+  const nextMetadata = resolveSnapshotMetadata(message.metadata, args)
   const contentUnchanged =
     message.content === args.textSnapshot &&
     JSON.stringify(message.parts) === JSON.stringify(args.partsSnapshot) &&
-    (args.workSummaryDurationMs === undefined ||
-      message.metadata?.workSummaryDurationMs === args.workSummaryDurationMs)
+    nextMetadata === undefined
 
   const now = nowMs()
   if (!isTerminalMessageStatus(message.status)) {
@@ -2549,9 +2610,7 @@ export async function updateAssistantSnapshotForChat(
       await ctx.db.patch(args.messageId, {
         content: args.textSnapshot,
         parts: args.partsSnapshot,
-        ...(args.workSummaryDurationMs !== undefined ? {
-          metadata: { ...message.metadata, workSummaryDurationMs: args.workSummaryDurationMs },
-        } : {}),
+        ...(nextMetadata ? { metadata: nextMetadata } : {}),
         ...(workerExecuting && { status: "streaming" as const }),
         updatedAt: now,
       })

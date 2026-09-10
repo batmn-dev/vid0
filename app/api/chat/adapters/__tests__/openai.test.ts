@@ -296,4 +296,43 @@ describe("openaiAdapter", () => {
       result.warnings.some((w) => w.code === "provider_ids_stripped")
     ).toBe(true)
   })
+
+  it("keeps text phase while stripping item ids and reasoning metadata (ADR-0041)", async () => {
+    const result = await openaiAdapter.adaptMessages(
+      [
+      {
+        id: "assistant-1",
+        role: "assistant",
+        metadata: { provider: "openai" },
+        parts: [
+          {
+            type: "reasoning",
+            text: "",
+            providerMetadata: { openai: { itemId: "rs_1" } },
+          },
+          {
+            type: "text",
+            text: "Looking.",
+            providerMetadata: { openai: { itemId: "msg_1", phase: "commentary" } },
+          },
+          {
+            type: "text",
+            text: "Answer.",
+            providerMetadata: { openai: { phase: "final_answer" } },
+          },
+        ],
+      },
+      ] as unknown as UIMessage[],
+      context
+    )
+    const [message] = result.messages
+    const records = message.parts as Array<{ providerMetadata?: unknown }>
+    expect(records.map((part) => part.providerMetadata)).toEqual([
+      undefined,
+      { openai: { phase: "commentary" } },
+      { openai: { phase: "final_answer" } },
+    ])
+    // The phase-only part had nothing to strip and is reported as preserved.
+    expect(result.stats.providerIdsStripped).toBe(2)
+  })
 })
