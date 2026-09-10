@@ -12,43 +12,83 @@ function parseObject(text: string) {
 
 function assertUnchanged(base: unknown, head: unknown, label: string) {
   if (!isDeepStrictEqual(base, head))
-    throw new Error(`${label} changed; dependency overlay only permits additions`)
+    throw new Error(`${label} changed; dependency overlay only permits dependency additions and version changes`)
 }
 
-function additions(base: Record<string, unknown>, head: Record<string, unknown>, label: string) {
-  for (const [name, value] of Object.entries(base))
-    assertUnchanged(value, head[name], `${label}: ${name}`)
-  return Object.keys(head).filter((name) => !Object.hasOwn(base, name)).sort()
+type SetDelta = { added: string[]; changed: string[]; removed: string[] }
+
+/** Names added, changed, or removed between two name-keyed sets. */
+function delta(base: Record<string, unknown>, head: Record<string, unknown>): SetDelta {
+  const added = Object.keys(head).filter((name) => !Object.hasOwn(base, name)).sort()
+  const changed: string[] = []
+  const removed: string[] = []
+  for (const [name, value] of Object.entries(base)) {
+    if (!Object.hasOwn(head, name)) removed.push(name)
+    else if (!isDeepStrictEqual(value, head[name])) changed.push(name)
+  }
+  return { added, changed: changed.sort(), removed: removed.sort() }
 }
 
-/** Normalize additive dependencies across both builds without upgrading the baseline. */
+/** A direct dependency set may grow or change versions; the base product may still import a removed one. */
+function directDelta(base: unknown, head: unknown, label: string) {
+  const result = delta(record.parse(base ?? {}), record.parse(head ?? {}))
+  if (result.removed.length > 0)
+    throw new Error(`${label} removed (${result.removed.join(", ")}); dependency overlay only permits dependency additions and version changes`)
+  return result
+}
+
+/**
+ * Normalize dependency changes across both builds. The head manifest and lock
+ * are installed in the baseline checkout too, so the comparison measures the
+ * product change under common dependencies, never dependency-upgrade
+ * performance on its own (the responsiveness targets still judge the head
+ * run in absolute terms). Additions and version changes of direct
+ * dependencies, and the locked package resolutions that follow from them, are
+ * permitted and recorded. Removing a direct dependency, and any change outside
+ * the dependency sets (scripts, lockfile settings, other workspaces), fails
+ * closed.
+ */
 export function validateDependencyOverlay(input: {
   baseManifest: string
   headManifest: string
   baseLock: string
   headLock: string
 }) {
-  const { dependencies: baseDeps, ...baseManifest } = parseObject(input.baseManifest)
-  const { dependencies: headDeps, ...headManifest } = parseObject(input.headManifest)
+  const { dependencies: baseDeps, devDependencies: baseDevDeps, ...baseManifest } = parseObject(input.baseManifest)
+  const { dependencies: headDeps, devDependencies: headDevDeps, ...headManifest } = parseObject(input.headManifest)
   assertUnchanged(baseManifest, headManifest, "Package manifest outside dependencies")
-  const addedDependencies = additions(record.parse(baseDeps), record.parse(headDeps), "Dependency")
+  const dependencies = directDelta(baseDeps, headDeps, "Dependency")
+  const devDependencies = directDelta(baseDevDeps, headDevDeps, "Dev dependency")
   const { workspaces: baseWorkspaces, packages: basePackages, ...baseLock } = parseObject(input.baseLock)
   const { workspaces: headWorkspaces, packages: headPackages, ...headLock } = parseObject(input.headLock)
   assertUnchanged(baseLock, headLock, "Lockfile settings")
   const { "": baseRoot, ...baseOtherWorkspaces } = record.parse(baseWorkspaces)
   const { "": headRoot, ...headOtherWorkspaces } = record.parse(headWorkspaces)
   assertUnchanged(baseOtherWorkspaces, headOtherWorkspaces, "Other workspaces")
-  const { dependencies: baseRootDeps, ...baseRootSettings } = record.parse(baseRoot)
-  const { dependencies: headRootDeps, ...headRootSettings } = record.parse(headRoot)
+  const { dependencies: baseRootDeps, devDependencies: baseRootDevDeps, ...baseRootSettings } = record.parse(baseRoot)
+  const { dependencies: headRootDeps, devDependencies: headRootDevDeps, ...headRootSettings } = record.parse(headRoot)
   assertUnchanged(baseRootSettings, headRootSettings, "Root workspace settings")
   assertUnchanged(baseDeps, baseRootDeps, "Base manifest/lock dependency agreement")
   assertUnchanged(headDeps, headRootDeps, "Head manifest/lock dependency agreement")
+  assertUnchanged(baseDevDeps, baseRootDevDeps, "Base manifest/lock dev dependency agreement")
+  assertUnchanged(headDevDeps, headRootDevDeps, "Head manifest/lock dev dependency agreement")
   const headPackageRecords = record.parse(headPackages)
-  const addedPackages = additions(record.parse(basePackages), headPackageRecords, "Locked package")
-  for (const name of addedDependencies)
+  // Transitive packages may come and go with a version change; a direct
+  // dependency cannot disappear from the lock while the manifest keeps it.
+  const packages = delta(record.parse(basePackages), headPackageRecords)
+  for (const name of [...dependencies.added, ...dependencies.changed, ...devDependencies.added, ...devDependencies.changed])
     if (!Object.hasOwn(headPackageRecords, name))
-      throw new Error(`Added dependency ${name} has no locked package entry`)
-  if (addedDependencies.length === 0)
-    throw new Error("Dependency overlay requires added dependencies")
-  return { addedDependencies, addedPackages }
+      throw new Error(`Dependency ${name} has no locked package entry`)
+  const changes = [dependencies, devDependencies, packages].reduce(
+    (count, set) => count + set.added.length + set.changed.length + set.removed.length, 0)
+  if (changes === 0) throw new Error("Dependency overlay requires a dependency change")
+  return {
+    addedDependencies: dependencies.added,
+    changedDependencies: dependencies.changed,
+    addedDevDependencies: devDependencies.added,
+    changedDevDependencies: devDependencies.changed,
+    addedPackages: packages.added,
+    changedPackages: packages.changed,
+    removedPackages: packages.removed,
+  }
 }

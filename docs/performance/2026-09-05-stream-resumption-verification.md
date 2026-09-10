@@ -113,3 +113,16 @@ added dependency/package names; the baseline diff records the normalization.
 This measures product changes under common dependencies, not dependency-upgrade
 performance. Five focused rejection/acceptance tests and validation against this
 branch's real lockfiles passed. Hosted benchmark results remain authoritative.
+
+**Amendment (2026-09-10).** The additive-only rule made every dependency
+upgrade fail closed, including a server-only Convex component bump (PR #187)
+whose client and route surface was byte-identical between base and head, and it
+would have blocked the routine dependency refresh. The overlay now also permits
+version changes of direct dependencies and dev dependencies, plus the locked
+package additions, changes, and removals that follow from them; the head
+manifest and lock are still installed in both builds, so the comparison keeps
+its common-dependency footing and the responsiveness targets still judge the
+head run in absolute terms. Removing a direct dependency, and any change outside
+the dependency sets (scripts, lockfile settings, other workspaces), still fails
+closed. The results manifest records added and changed dependencies and the
+package delta.
