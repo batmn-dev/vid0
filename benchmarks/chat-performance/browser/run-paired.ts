@@ -109,8 +109,9 @@ function main() {
   if (measurementBootstrap(readFileSync(path.join(root, bootstrap), "utf8")) !==
       measurementBootstrap(readFileSync(path.join(baselineRoot, bootstrap), "utf8")))
     throw new Error("Measurement bootstrap differs; review a measurement-only overlay before comparing")
-  // Both builds install the exact same dependencies. Only additive changes can
-  // be overlaid; upgrades/removals and build configuration changes fail closed.
+  // Both builds install the exact same dependencies: the head's. Additions and
+  // version changes are overlaid and recorded in the manifest; removing a
+  // direct dependency and build configuration changes fail closed.
   const originalBaseDependencySha256 = digest(path.join(baselineRoot, "bun.lock"))
   let dependencyOverlay: ReturnType<typeof validateDependencyOverlay> | null = null
   if (originalBaseDependencySha256 !== digest(path.join(root, "bun.lock")) ||
