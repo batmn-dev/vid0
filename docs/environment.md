@@ -142,6 +142,36 @@ Copy the webhook signing secret into Convex env as `WORKOS_WEBHOOK_SECRET`.
 Do not set `WORKOS_WEBHOOK_SECRET` in Vercel; the webhook handler runs in
 Convex.
 
+Each endpoint has its own signing secret, and the secret must belong to the
+endpoint whose URL targets that deployment. A mismatch fails every delivery
+with `Uncaught SignatureVerificationException` in the deployment's function log
+and a 500 in WorkOS's delivery log; WorkOS keeps retrying, and no user event
+reaches the app. Prove a deployment's secret without opening the WorkOS
+dashboard and without printing the value:
+
+```bash
+# dev: writes one synthetic user through the full pipeline, then soft-deletes it
+WORKOS_WEBHOOK_SECRET="$(bunx convex env get WORKOS_WEBHOOK_SECRET)" \
+  bun scripts/workos-webhook-probe.mjs https://<dev-slug>.convex.site
+
+# production: no writes; expect a 500 whose log line is a ValidationError, not a
+# SignatureVerificationException
+WORKOS_WEBHOOK_SECRET="$(bunx convex env get --prod WORKOS_WEBHOOK_SECRET)" \
+  bun scripts/workos-webhook-probe.mjs https://<prod-slug>.convex.site --no-write
+```
+
+The AuthKit component (`@convex-dev/workos-authkit` 0.2.9+) processes every
+event inline from the signature-verified payload and inserts a user it has not
+seen when a `user.updated` arrives first. A `user.deleted` for a user the
+component has never seen is still skipped, so after wiping a deployment, or
+when its component tables are empty while WorkOS already has users, seed them
+once from WorkOS (this also upserts the app's `users` rows):
+
+```bash
+bunx convex run workosAuth:backfillUsers        # dev
+bunx convex run --prod workosAuth:backfillUsers # production
+```
+
 ```bash
 bunx convex env set WORKOS_WEBHOOK_SECRET "<secret>"
 ```
@@ -330,7 +360,7 @@ settings.
 | `NEXT_PUBLIC_CONVEX_URL is required`                                    | Run `bunx convex dev` locally, or confirm Vercel uses the Convex deploy build command.                       |
 | WorkOS login redirects fail                                             | Confirm `NEXT_PUBLIC_WORKOS_REDIRECT_URI` exactly matches the WorkOS redirect URI and ends in `/callback`.   |
 | Convex auth returns unauthenticated                                     | Confirm `WORKOS_CLIENT_ID` is set in Convex env and redeploy with `bunx convex dev` or `bunx convex deploy`. |
-| WorkOS webhook events fail                                              | Confirm the endpoint URL, subscribed events, and `WORKOS_WEBHOOK_SECRET` in Convex env.                      |
+| WorkOS webhook events fail                                              | Run `scripts/workos-webhook-probe.mjs` against the deployment (see WorkOS Webhook). `SignatureVerificationException` means `WORKOS_WEBHOOK_SECRET` is not that endpoint's secret; `user not found` on updates means the component table needs `workosAuth:backfillUsers`. |
 | Saved API keys stop decrypting                                          | Restore the previous `ENCRYPTION_KEY` or migrate encrypted values before rotating it.                        |
 | Durable chat admission or usage reservation rejects before run creation | Confirm `CHAT_ADMISSION_SECRET` is present and identical in Vercel/local and the target Convex deployment.   |
 | `bun run env:check` rejects a custom local domain                       | Set `ALLOW_NON_LOCAL_WORKOS_REDIRECT_URI=1` only for that check.                                             |
