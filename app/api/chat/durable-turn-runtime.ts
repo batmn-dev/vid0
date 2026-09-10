@@ -856,8 +856,13 @@ export function createDurableSnapshotTracker(
   return {
     onChunk,
     noteWorkSummary,
+    // A provider `error` part errors the reducer's reader
+    // (`terminateOnError`), so `drain()` rejects on the failure path. The
+    // reduced text/parts and the noted pre-answer duration are still the last
+    // good state, and the write below is what the failure verdict promotes;
+    // tolerate the rejected drain the same way `flushFinal` does.
     flush: async () => {
-      await drain()
+      await drain().catch(() => {})
       await persist(true)
     },
     flushFinal,
