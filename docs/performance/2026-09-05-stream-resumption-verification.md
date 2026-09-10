@@ -101,11 +101,13 @@ localhost:3002; production had not been deployed at this verification point.
 ## PR benchmark dependency normalization
 
 The Redis dependency addition initially stopped the paired CI benchmark before
-measurement because its lockfiles differed. The runner now permits only additive
-production dependencies with every baseline package resolution, existing manifest
-setting and workspace setting unchanged. It installs the head manifest and lock
-in the isolated baseline checkout, then retains the identical-lockfile check.
-Dependency upgrades/removals and fixture or timing-helper drift still fail closed.
+measurement because its lockfiles differed. At that point the runner permitted
+only additive production dependencies with every baseline package resolution,
+existing manifest setting and workspace setting unchanged (historical; the
+2026-09-10 amendment below widens this to version changes). It installs the
+head manifest and lock in the isolated baseline checkout, then retains the
+identical-lockfile check. Dependency removals and fixture or timing-helper
+drift still fail closed.
 
 Both builds therefore use the same installed dependencies while retaining their
 own product source. The manifest records the original baseline lock hash and all

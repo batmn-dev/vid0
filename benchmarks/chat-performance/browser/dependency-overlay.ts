@@ -79,9 +79,13 @@ export function validateDependencyOverlay(input: {
   for (const name of [...dependencies.added, ...dependencies.changed, ...devDependencies.added, ...devDependencies.changed])
     if (!Object.hasOwn(headPackageRecords, name))
       throw new Error(`Dependency ${name} has no locked package entry`)
-  const changes = [dependencies, devDependencies, packages].reduce(
-    (count, set) => count + set.added.length + set.changed.length + set.removed.length, 0)
-  if (changes === 0) throw new Error("Dependency overlay requires a dependency change")
+  // Package deltas ride only on a reviewed manifest change. A lock-only
+  // resolution refresh would otherwise install upgraded packages into both
+  // builds without any direct dependency saying so.
+  const directChanges = dependencies.added.length + dependencies.changed.length +
+    devDependencies.added.length + devDependencies.changed.length
+  if (directChanges === 0)
+    throw new Error("Dependency overlay requires an added or changed direct dependency")
   return {
     addedDependencies: dependencies.added,
     changedDependencies: dependencies.changed,

@@ -93,6 +93,13 @@ describe("paired dependency overlay", () => {
   it("rejects identical dependencies as a no-op overlay", () => {
     expect(() => validateDependencyOverlay({
       ...input(), headManifest: JSON.stringify(base), headLock: JSON.stringify(baseLock),
-    })).toThrow(/requires a dependency change/)
+    })).toThrow(/requires an added or changed direct dependency/)
+  })
+
+  it("rejects a lock-only resolution change with unchanged manifests", () => {
+    const refreshedLock = lock(base.dependencies, { ...baseLock.packages, react: ["react@20", "integrity"] })
+    expect(() => validateDependencyOverlay({
+      ...input(), headManifest: JSON.stringify(base), headLock: JSON.stringify(refreshedLock),
+    })).toThrow(/requires an added or changed direct dependency/)
   })
 })
