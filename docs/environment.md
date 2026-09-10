@@ -154,8 +154,9 @@ dashboard and without printing the value:
 WORKOS_WEBHOOK_SECRET="$(bunx convex env get WORKOS_WEBHOOK_SECRET)" \
   bun scripts/workos-webhook-probe.mjs https://<dev-slug>.convex.site
 
-# production: no writes; expect a 500 whose log line is a ValidationError, not a
-# SignatureVerificationException
+# production: no writes; exits 0 only after reading the deployment's function
+# log (your `bunx convex` login) and finding the expected validator rejection,
+# 1 on a SignatureVerificationException, 2 when inconclusive
 WORKOS_WEBHOOK_SECRET="$(bunx convex env get --prod WORKOS_WEBHOOK_SECRET)" \
   bun scripts/workos-webhook-probe.mjs https://<prod-slug>.convex.site --no-write
 ```
@@ -360,7 +361,7 @@ settings.
 | `NEXT_PUBLIC_CONVEX_URL is required`                                    | Run `bunx convex dev` locally, or confirm Vercel uses the Convex deploy build command.                       |
 | WorkOS login redirects fail                                             | Confirm `NEXT_PUBLIC_WORKOS_REDIRECT_URI` exactly matches the WorkOS redirect URI and ends in `/callback`.   |
 | Convex auth returns unauthenticated                                     | Confirm `WORKOS_CLIENT_ID` is set in Convex env and redeploy with `bunx convex dev` or `bunx convex deploy`. |
-| WorkOS webhook events fail                                              | Run `scripts/workos-webhook-probe.mjs` against the deployment (see WorkOS Webhook). `SignatureVerificationException` means `WORKOS_WEBHOOK_SECRET` is not that endpoint's secret; `user not found` on updates means the component table needs `workosAuth:backfillUsers`. |
+| WorkOS webhook events fail                                              | Run `scripts/workos-webhook-probe.mjs` against the deployment (see WorkOS Webhook). `SignatureVerificationException` means `WORKOS_WEBHOOK_SECRET` is not that endpoint's secret; `user not found` on a `user.deleted` means the component never saw that user (updates insert on first sight), so run `workosAuth:backfillUsers` after a reset. |
 | Saved API keys stop decrypting                                          | Restore the previous `ENCRYPTION_KEY` or migrate encrypted values before rotating it.                        |
 | Durable chat admission or usage reservation rejects before run creation | Confirm `CHAT_ADMISSION_SECRET` is present and identical in Vercel/local and the target Convex deployment.   |
 | `bun run env:check` rejects a custom local domain                       | Set `ALLOW_NON_LOCAL_WORKOS_REDIRECT_URI=1` only for that check.                                             |

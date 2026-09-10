@@ -12,12 +12,14 @@
 //     WORKOS_WEBHOOK_SECRET="$(bunx convex env get --prod WORKOS_WEBHOOK_SECRET)" \
 //       bun scripts/workos-webhook-probe.mjs https://<prod-slug>.convex.site --no-write
 //
-// Reading the result: HTTP 200 means the secret verified and the event was
-// processed. A 500 whose log line reads `SignatureVerificationException` means
-// the deployment's secret is not the signing secret of the WorkOS endpoint
-// that targets this URL. In `--no-write` mode the expected outcome is a 500
-// whose log line reads `ValidationError: Validator error for id`; production
-// redacts response bodies, so read the deployment's function log.
+// Exit status is conclusive or nonzero. In write mode every event must return
+// 200. In `--no-write` mode the route answers 500 whether the signature failed
+// or the validator rejected the missing id, and production redacts the body,
+// so the script reads the deployment's function log through `bunx convex logs`
+// (the operator's CLI login) and exits 0 only when the newest webhook entry is
+// the expected `ValidationError` for `id`. A `SignatureVerificationException`
+// exits 1; anything else exits 2 as inconclusive with the request id to look up.
+import { spawn } from "node:child_process"
 import { createHmac, randomUUID } from "node:crypto"
 
 const secret = process.env.WORKOS_WEBHOOK_SECRET
@@ -29,6 +31,9 @@ if (!secret || !base) {
   )
   process.exit(2)
 }
+
+const EXPECTED_NO_WRITE = "Validator error for id"
+const SIGNATURE_FAILURE = "SignatureVerificationException"
 
 const nowIso = () => new Date().toISOString()
 const tag = randomUUID().replace(/-/g, "").slice(0, 14).toUpperCase()
@@ -68,16 +73,68 @@ async function send(label, payload) {
     },
     body,
   })
-  const text = (await res.text()).slice(0, 200).replace(/\s+/g, " ")
-  console.log(JSON.stringify({ probe: label, status: res.status, body: text }))
-  return res.status
+  const text = (await res.text()).slice(0, 300).replace(/\s+/g, " ")
+  const requestId = text.match(/Request ID: ([0-9a-f]+)/)?.[1]
+  console.log(JSON.stringify({ probe: label, status: res.status, requestId }))
+  return { status: res.status, text, requestId }
+}
+
+/** Newest `/workos/webhook` entry from the deployment's function log. */
+function latestWebhookLogEntry(deployment) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      "bunx",
+      ["convex", "logs", "--deployment", deployment, "--history", "60"],
+      { stdio: ["ignore", "pipe", "pipe"] }
+    )
+    let out = ""
+    child.stdout.on("data", (chunk) => (out += chunk))
+    child.stderr.on("data", (chunk) => (out += chunk))
+    const done = () => {
+      const lines = out.split("\n")
+      let entry = null
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].includes("H(POST /workos/webhook)")) continue
+        entry = lines.slice(i, i + 3).join("\n")
+      }
+      resolve(entry)
+    }
+    setTimeout(() => {
+      child.kill()
+      done()
+    }, 8000)
+    child.on("error", done)
+  })
 }
 
 if (noWrite) {
   const payload = event("user.created", user())
   delete payload.id
-  const status = await send("no-write (missing event id)", payload)
-  process.exit(status === 500 ? 0 : 1)
+  const { status, text, requestId } = await send("no-write (missing event id)", payload)
+  if (status !== 500) {
+    console.error(`unexpected status ${status}; the route should reject the missing id`)
+    process.exit(2)
+  }
+  let evidence = text
+  if (!text.includes(EXPECTED_NO_WRITE) && !text.includes(SIGNATURE_FAILURE)) {
+    // Redacted body (production). Read the function log instead.
+    const deployment = new URL(base).hostname.split(".")[0]
+    evidence = (await latestWebhookLogEntry(deployment)) ?? ""
+  }
+  if (evidence.includes(EXPECTED_NO_WRITE)) {
+    console.log(JSON.stringify({ verdict: "secret verified", requestId }))
+    process.exit(0)
+  }
+  if (evidence.includes(SIGNATURE_FAILURE)) {
+    console.error(
+      JSON.stringify({ verdict: "signature rejected: WORKOS_WEBHOOK_SECRET is not this endpoint's secret", requestId })
+    )
+    process.exit(1)
+  }
+  console.error(
+    JSON.stringify({ verdict: "inconclusive: look up the request id in the function log", requestId })
+  )
+  process.exit(2)
 }
 
 const created = await send("user.created", event("user.created", user()))
@@ -87,4 +144,4 @@ const updated = await send(
 )
 const deleted = await send("user.deleted", event("user.deleted", user()))
 console.log(JSON.stringify({ probeUserId: userId }))
-process.exit([created, updated, deleted].every((s) => s === 200) ? 0 : 1)
+process.exit([created, updated, deleted].every((r) => r.status === 200) ? 0 : 1)

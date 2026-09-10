@@ -17,7 +17,7 @@
         "@ai-sdk/xai": "^4.0.42",
         "@base-ui/react": "^1.6.0",
         "@convex-dev/agent": "0.7.1",
-        "@convex-dev/workos-authkit": "0.2.9",
+        "@convex-dev/workos-authkit": "^0.2.9",
         "@openrouter/ai-sdk-provider": "^3.0.0",
         "@remixicon/react": "^4.9.0",
         "@sentry/nextjs": "^10.63.0",
